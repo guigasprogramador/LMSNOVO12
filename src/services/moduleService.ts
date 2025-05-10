@@ -36,54 +36,51 @@ export const moduleService = {
     
     // Tentar obter do cache primeiro, com expiração de 10 minutos
     try {
-      return await cacheManager.getOrSet(
-        cacheKey,
-        async () => {
-          console.log(`Buscando módulos do curso ${courseId} do servidor...`);
-          
-          // Buscar os módulos usando a fila de requisições
-          const modulesResponse = await requestQueue.enqueue(async () => {
-            const response = await supabase
-              .from('modules')
-              .select('id, title, description, order_number, course_id')
-              .eq('course_id', courseId)
-              .order('order_number', { ascending: true });
-              
-            return response;
-          });
-          
-          const modules = modulesResponse.data || [];
-          const modulesError = modulesResponse.error;
-
-          if (modulesError) throw modulesError;
-          
-          if (modules.length === 0) {
-            console.log('Nenhum módulo encontrado para o curso:', courseId);
-            return []; // Retornar array vazio em vez de lançar erro
-          }
+      // Buscar diretamente do Supabase sem usar o cacheManager ou requestQueue
+      // para evitar problemas de throttling e cache que estão causando erros HTTP 400
+      console.log(`Buscando módulos do curso ${courseId} do servidor...`);
+      
+      const { data: modules, error: modulesError } = await supabase
+        .from('modules')
+        .select('id, title, description, order_number, course_id')
+        .eq('course_id', courseId)
+        .order('order_number', { ascending: true });
+      
+      if (modulesError) {
+        console.error(`Erro ao buscar módulos do curso ${courseId}:`, modulesError);
+        return []; // Retornar array vazio em caso de erro em vez de lançar erro
+      }
+      
+      if (!modules || modules.length === 0) {
+        console.log('Nenhum módulo encontrado para o curso:', courseId);
+        return []; // Retornar array vazio em vez de lançar erro
+      }
 
           // Processar módulos sequencialmente para evitar muitas requisições simultâneas
           const modulesWithLessons: Module[] = [];
           
           for (const module of modules) {
             try {
-              // Buscar aulas para este módulo usando a fila de requisições
-              const lessonsResponse = await requestQueue.enqueue(async () => {
-                const response = await supabase
-                  .from('lessons')
-                  .select('id, module_id, title, description, duration, video_url, content, order_number')
-                  .eq('module_id', module.id)
-                  .order('order_number', { ascending: true });
-                  
-                return response;
-              });
+              // Buscar aulas diretamente do Supabase sem usar requestQueue
+              // para evitar problemas de throttling que estão causando erros HTTP 400
+              const { data: lessons, error: lessonsError } = await supabase
+                .from('lessons')
+                .select('id, module_id, title, description, duration, video_url, content, order_number')
+                .eq('module_id', module.id)
+                .order('order_number', { ascending: true });
               
-              const lessons = lessonsResponse.data || [];
-              const lessonsError = lessonsResponse.error;
-
               if (lessonsError) {
                 console.error(`Erro ao buscar aulas para o módulo ${module.id}:`, lessonsError);
-                throw lessonsError;
+                // Continuar com lista vazia de aulas em vez de lançar erro
+                modulesWithLessons.push({
+                  id: module.id,
+                  title: module.title,
+                  description: module.description || '',
+                  order: module.order_number,
+                  courseId: module.course_id,
+                  lessons: []
+                });
+                continue;
               }
 
               modulesWithLessons.push({
@@ -92,7 +89,7 @@ export const moduleService = {
                 description: module.description || '',
                 order: module.order_number,
                 courseId: module.course_id,
-                lessons: lessons.map(lesson => ({
+                lessons: (lessons || []).map(lesson => ({
                   id: lesson.id,
                   moduleId: lesson.module_id,
                   title: lesson.title,
@@ -106,40 +103,23 @@ export const moduleService = {
               });
             } catch (error) {
               console.error(`Erro ao processar módulo ${module.id}:`, error);
-              // Continuar com os outros módulos mesmo se um falhar
+              // Continuar com próximo módulo em vez de falhar completamente
               modulesWithLessons.push({
                 id: module.id,
                 title: module.title,
                 description: module.description || '',
                 order: module.order_number,
                 courseId: module.course_id,
-                lessons: [] // Sem aulas se houver erro
+                lessons: []
               });
             }
           }
 
-          return modulesWithLessons;
-        },
-        30 * 60 * 1000 // 30 minutos de cache para reduzir requisiu00e7u00f5es
-      );
+          return modulesWithLessons.sort((a, b) => a.order - b.order);
     } catch (error) {
       console.error('Erro ao buscar módulos do curso:', error);
-      
-      // Mensagens de erro mais informativas
-      if (error instanceof Error) {
-        if (error.message.includes('rate limit') || error.message.includes('429')) {
-          throw new Error('O servidor está temporariamente sobrecarregado. Estamos limitando as requisições para evitar problemas. Por favor, aguarde alguns instantes.');
-        }
-        
-        if (error.message.includes('network') || error.message.includes('Network')) {
-          throw new Error('Problema de conexão detectado. Verifique sua internet e tente novamente.');
-        }
-        
-        // Incluir a mensagem original para ajudar no diagnóstico
-        throw new Error(`Erro ao carregar módulos e aulas: ${error.message}`);
-      }
-      
-      throw new Error('Falha ao buscar módulos do curso. Tente novamente mais tarde.');
+      // Retornar array vazio em vez de lançar erro para evitar quebrar a UI
+      return [];
     }
   },
 

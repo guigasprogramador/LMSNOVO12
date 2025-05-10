@@ -3,15 +3,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { courseService } from "@/services/api";
 import { BookOpen } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 const AdminDashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState({
     totalCourses: 0,
     totalModules: 0,
     totalLessons: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
+  
+  const handleNavigateToCourses = () => {
+    navigate("/admin/courses");
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -66,7 +72,10 @@ const AdminDashboard = () => {
 
       {/* Stats Overview */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <Card>
+        <Card 
+          className="cursor-pointer hover:shadow-md transition-shadow duration-200" 
+          onClick={handleNavigateToCourses}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total de Cursos</CardTitle>
             <BookOpen className="h-4 w-4 text-muted-foreground" />

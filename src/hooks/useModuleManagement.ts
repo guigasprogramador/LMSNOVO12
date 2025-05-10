@@ -3,6 +3,8 @@ import { Module } from '@/types';
 import { moduleService } from '@/services/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAppData } from '@/contexts/AppDataContext';
 
 export interface ModuleFormData {
   title: string;
@@ -17,32 +19,68 @@ const defaultFormData: ModuleFormData = {
 };
 
 export function useModuleManagement(courseId: string) {
-  const [modules, setModules] = useState<Module[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState<ModuleFormData>(defaultFormData);
   const [editingModuleId, setEditingModuleId] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const { isAdmin } = useAuth();
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    if (courseId) {
-      fetchModules();
-    }
-  }, [courseId]);
+  // Usar o contexto de dados da aplicação
+  const { 
+    getModulesByCourseId,
+    isLoadingModules: isLoading,
+    refreshModules,
+    addModule,
+    updateModuleInState,
+    removeModule
+  } = useAppData();
+  
+  // Obter módulos do curso atual
+  const modules = getModulesByCourseId(courseId);
 
-  const fetchModules = async () => {
-    try {
-      setIsLoading(true);
-      const modulesData = await moduleService.getModules(courseId);
-      setModules(modulesData);
-    } catch (error) {
-      console.error('Error fetching modules:', error);
-      toast.error('Erro ao carregar os módulos');
-    } finally {
-      setIsLoading(false);
+  // Mutação para criar módulo
+  const createModuleMutation = useMutation({
+    mutationFn: (moduleData: ModuleFormData) => moduleService.createModule(courseId, moduleData),
+    onSuccess: (newModule) => {
+      toast.success('Módulo criado com sucesso');
+      // Adicionar o novo módulo ao estado local imediatamente
+      addModule(newModule);
+      setIsDialogOpen(false);
+      resetForm();
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao criar módulo: ${error.message}`);
     }
-  };
+  });
+
+  // Mutação para atualizar módulo
+  const updateModuleMutation = useMutation({
+    mutationFn: ({ moduleId, moduleData }: { moduleId: string, moduleData: any }) => 
+      moduleService.updateModule(moduleId, moduleData),
+    onSuccess: (_, variables) => {
+      toast.success('Módulo atualizado com sucesso');
+      // Atualizar o estado local imediatamente
+      updateModuleInState(variables.moduleId, variables.moduleData);
+      setIsDialogOpen(false);
+      resetForm();
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao atualizar módulo: ${error.message}`);
+    }
+  });
+
+  // Mutação para excluir módulo
+  const deleteModuleMutation = useMutation({
+    mutationFn: moduleService.deleteModule,
+    onSuccess: (_, moduleId) => {
+      toast.success('Módulo excluído com sucesso');
+      // Remover o módulo do estado local imediatamente
+      removeModule(moduleId);
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao excluir módulo: ${error.message}`);
+    }
+  });
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -65,24 +103,10 @@ export function useModuleManagement(courseId: string) {
       return;
     }
 
-    setIsSubmitting(true);
-
-    try {
-      if (editingModuleId) {
-        await moduleService.updateModule(editingModuleId, formData);
-        toast.success('Módulo atualizado com sucesso');
-      } else {
-        await moduleService.createModule(courseId, formData);
-        toast.success('Módulo criado com sucesso');
-      }
-
-      setIsDialogOpen(false);
-      resetForm();
-      fetchModules();
-    } catch (error: any) {
-      toast.error(`Erro ao salvar módulo: ${error.message}`);
-    } finally {
-      setIsSubmitting(false);
+    if (editingModuleId) {
+      updateModuleMutation.mutate({ moduleId: editingModuleId, moduleData: formData });
+    } else {
+      createModuleMutation.mutate(formData);
     }
   };
 
@@ -96,7 +120,7 @@ export function useModuleManagement(courseId: string) {
     setIsDialogOpen(true);
   };
 
-  const handleDeleteModule = async (moduleId: string) => {
+  const handleDeleteModule = (moduleId: string) => {
     if (!isAdmin()) {
       toast.error('Você não tem permissão para excluir módulos');
       return;
@@ -106,13 +130,7 @@ export function useModuleManagement(courseId: string) {
       return;
     }
 
-    try {
-      await moduleService.deleteModule(moduleId);
-      toast.success('Módulo excluído com sucesso');
-      fetchModules();
-    } catch (error: any) {
-      toast.error(`Erro ao excluir módulo: ${error.message}`);
-    }
+    deleteModuleMutation.mutate(moduleId);
   };
 
   const resetForm = () => {
@@ -122,12 +140,12 @@ export function useModuleManagement(courseId: string) {
 
   return {
     modules,
-    isLoading,
+    isLoading: isLoading || createModuleMutation.isPending || updateModuleMutation.isPending || deleteModuleMutation.isPending,
     isDialogOpen,
     setIsDialogOpen,
     formData,
     editingModuleId,
-    isSubmitting,
+    isSubmitting: createModuleMutation.isPending || updateModuleMutation.isPending,
     handleInputChange,
     handleEditModule,
     handleDeleteModule,

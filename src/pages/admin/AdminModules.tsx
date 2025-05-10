@@ -137,11 +137,18 @@ const AdminModules = () => {
       try {
         await moduleService.deleteModule(moduleId);
         toast.success("Módulo excluído com sucesso");
-        if (selectedCourseId) {
-          fetchModulesByCourse(selectedCourseId);
-        } else {
-          fetchData();
-        }
+        
+        // Remover o módulo do estado local imediatamente
+        setModules(prevModules => prevModules.filter(module => module.id !== moduleId));
+        
+        // Atualizar os dados em segundo plano para garantir sincronização
+        setTimeout(() => {
+          if (selectedCourseId) {
+            fetchModulesByCourse(selectedCourseId);
+          } else {
+            fetchData();
+          }
+        }, 1000); // Atraso de 1 segundo para dar tempo à UI de renderizar primeiro
       } catch (error) {
         console.error("Error deleting module:", error);
         toast.error("Erro ao excluir o módulo");
@@ -160,32 +167,92 @@ const AdminModules = () => {
       toast.error("Selecione um curso para o módulo");
       return;
     }
+    
+    // Criar um ID temporário para o novo módulo
+    const tempId = `temp-${Date.now()}`;
+    
+    // Se estiver criando um novo módulo, adicione-o imediatamente ao estado com um ID temporário
+    if (!editingModuleId) {
+      const tempModule: Module = {
+        id: tempId,
+        title: formData.title.trim(),
+        description: formData.description?.trim() || '',
+        order: Number(formData.order) || 1,
+        courseId: formData.courseId,
+        lessons: []
+      };
+      
+      // Adicionar o módulo temporário ao estado imediatamente
+      console.log('Adicionando módulo temporário ao estado:', tempModule);
+      setModules(prevModules => [...prevModules, tempModule]);
+    }
+    
     setIsLoading(true);
     try {
       if (editingModuleId) {
-        await moduleService.updateModule(editingModuleId, {
+        // Atualizar módulo existente
+        const updatedModuleData = {
           title: formData.title.trim(),
           description: formData.description?.trim() || '',
           order: Number(formData.order) || 1,
-        });
+        };
+        
+        await moduleService.updateModule(editingModuleId, updatedModuleData);
         toast.success("Módulo atualizado com sucesso");
+        
+        // Atualizar o módulo no estado local imediatamente
+        setModules(prevModules => 
+          prevModules.map(module => 
+            module.id === editingModuleId 
+              ? { ...module, ...updatedModuleData }
+              : module
+          )
+        );
       } else {
-        await moduleService.createModule(formData.courseId, {
+        // Criar novo módulo
+        const moduleData = {
           title: formData.title.trim(),
           description: formData.description?.trim() || '',
           order: Number(formData.order) || 1,
-        });
+        };
+        
+        const newModule = await moduleService.createModule(formData.courseId, moduleData);
         toast.success("Módulo criado com sucesso");
+        
+        // Substituir o módulo temporário pelo módulo real
+        setModules(prevModules => 
+          prevModules.map(module => 
+            module.id === tempId 
+              ? {
+                  id: newModule.id,
+                  title: newModule.title,
+                  description: newModule.description || '',
+                  order: newModule.order,
+                  courseId: newModule.courseId,
+                  lessons: []
+                }
+              : module
+          )
+        );
       }
+      
       setIsDialogOpen(false);
       setFormData({ ...defaultFormData, courseId: selectedCourseId });
       setEditingModuleId(null);
-      if (selectedCourseId) {
-        fetchModulesByCourse(selectedCourseId);
-      } else {
-        fetchData();
-      }
+      
+      // Atualizar os dados em segundo plano para garantir sincronização
+      setTimeout(() => {
+        if (selectedCourseId) {
+          fetchModulesByCourse(selectedCourseId);
+        } else {
+          fetchData();
+        }
+      }, 1000); // Atraso de 1 segundo para dar tempo à UI de renderizar primeiro
     } catch (error: any) {
+      // Se ocorrer um erro e estiver criando um novo módulo, remova o módulo temporário
+      if (!editingModuleId) {
+        setModules(prevModules => prevModules.filter(module => module.id !== tempId));
+      }
       toast.error(error.message || "Erro ao salvar o módulo");
     } finally {
       setIsLoading(false);

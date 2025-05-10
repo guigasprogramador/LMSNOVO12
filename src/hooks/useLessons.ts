@@ -1,10 +1,16 @@
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lessonService, moduleService, courseService } from "@/services/api";
 import { Lesson, Module, Course } from "@/types";
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
+import { realtimeEvents } from "@/utils/realtimeSubscriptions";
 
 export function useLessons(moduleId?: string) {
+  const queryClient = useQueryClient();
+  
+  // Não precisamos mais do useEffect com realtimeEvents, pois estamos usando o React Query diretamente
+  
   const {
     data: lessons = [],
     isLoading: isLoadingLessons,
@@ -25,6 +31,8 @@ export function useLessons(moduleId?: string) {
 }
 
 export function useModules(courseId?: string) {
+  const queryClient = useQueryClient();
+  
   const {
     data: modules = [],
     isLoading: isLoadingModules,
@@ -46,7 +54,16 @@ export function useModules(courseId?: string) {
 
 export function useLessonMutations() {
   const createLessonMutation = useMutation({
-    mutationFn: (lesson: Omit<Lesson, "id">) => lessonService.createLesson(lesson),
+    mutationFn: (data: Omit<Lesson, "id">) => {
+      return lessonService.createLesson(data.moduleId, {
+        title: data.title,
+        description: data.description,
+        duration: data.duration,
+        videoUrl: data.videoUrl,
+        content: data.content,
+        order: data.order
+      });
+    }
   });
 
   const updateLessonMutation = useMutation({
@@ -63,6 +80,9 @@ export function useLessonMutations() {
     mutationFn: (id: string) => lessonService.deleteLesson(id),
   });
 
+  // Remover esta mutação se não existe o método updateLessonStatus no seu serviço
+  // ou implementar o método no serviço
+  /*
   const updateLessonStatusMutation = useMutation({
     mutationFn: ({
       lessonId,
@@ -74,6 +94,7 @@ export function useLessonMutations() {
       completed: boolean;
     }) => lessonService.updateLessonStatus(lessonId, userId, completed),
   });
+  */
 
   return {
     createLesson: createLessonMutation.mutate,
@@ -82,8 +103,6 @@ export function useLessonMutations() {
     isUpdating: updateLessonMutation.isPending,
     deleteLesson: deleteLessonMutation.mutate,
     isDeleting: deleteLessonMutation.isPending,
-    updateLessonStatus: updateLessonStatusMutation.mutate,
-    isUpdatingStatus: updateLessonStatusMutation.isPending,
   };
 }
 
@@ -101,6 +120,7 @@ export function useAdminLessons() {
     order: 0,
     videoUrl: "",
     content: "",
+    isCompleted: false
   });
 
   // Get courses
@@ -125,14 +145,66 @@ export function useAdminLessons() {
     refetchLessons,
   } = useLessons(selectedModuleId);
 
-  const {
-    createLesson,
-    updateLesson,
-    deleteLesson,
-    isCreating,
-    isUpdating,
-    isDeleting,
-  } = useLessonMutations();
+  // Mutações com integração aprimorada com o queryClient
+  const queryClient = useQueryClient();
+
+  // Mutação para criar aula
+  const createLessonMutation = useMutation({
+    mutationFn: (data: Omit<Lesson, "id">) => {
+      // O campo isCompleted não é aceito pelo serviço, apenas usamos na interface
+      return lessonService.createLesson(data.moduleId, {
+        title: data.title,
+        description: data.description,
+        duration: data.duration,
+        videoUrl: data.videoUrl,
+        content: data.content,
+        order: data.order
+      });
+    },
+    onSuccess: () => {
+      toast.success("Aula criada com sucesso");
+      // Invalidar queries para forçar atualização imediata
+      queryClient.invalidateQueries({ queryKey: ["lessons", selectedModuleId] });
+      queryClient.invalidateQueries({ queryKey: ["modules", selectedCourseId] });
+      setIsDialogOpen(false);
+      resetForm();
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao criar aula: ${error.message}`);
+    }
+  });
+
+  // Mutação para atualizar aula
+  const updateLessonMutation = useMutation({
+    mutationFn: ({ id, lesson }: { id: string, lesson: Partial<Lesson> }) => 
+      lessonService.updateLesson(id, lesson),
+    onSuccess: () => {
+      toast.success("Aula atualizada com sucesso");
+      queryClient.invalidateQueries({ queryKey: ["lessons", selectedModuleId] });
+      setIsDialogOpen(false);
+      resetForm();
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao atualizar aula: ${error.message}`);
+    }
+  });
+
+  // Mutação para excluir aula
+  const deleteLessonMutation = useMutation({
+    mutationFn: lessonService.deleteLesson,
+    onSuccess: () => {
+      toast.success("Aula excluída com sucesso");
+      queryClient.invalidateQueries({ queryKey: ["lessons", selectedModuleId] });
+      queryClient.invalidateQueries({ queryKey: ["modules", selectedCourseId] });
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao excluir aula: ${error.message}`);
+    }
+  });
+
+  const isCreating = createLessonMutation.isPending;
+  const isUpdating = updateLessonMutation.isPending;
+  const isDeleting = deleteLessonMutation.isPending;
 
   const isLoading = isLoadingCourses || isLoadingModules || isLoadingLessons || isCreating || isUpdating || isDeleting;
   
@@ -156,6 +228,7 @@ export function useAdminLessons() {
       order: lessons.length + 1,
       videoUrl: "",
       content: "",
+      isCompleted: false
     });
     setEditingLessonId(null);
   };
@@ -169,10 +242,9 @@ export function useAdminLessons() {
     setIsDialogOpen(true);
   };
 
-  const handleDeleteLesson = async (lessonId: string) => {
-    if (confirm("Are you sure you want to delete this lesson?")) {
-      await deleteLesson(lessonId);
-      refetchLessons();
+  const handleDeleteLesson = (lessonId: string) => {
+    if (confirm("Tem certeza que deseja excluir esta aula?")) {
+      deleteLessonMutation.mutate(lessonId);
     }
   };
 
@@ -182,14 +254,10 @@ export function useAdminLessons() {
     try {
       if (editingLessonId) {
         const { id, ...lessonData } = formData;
-        await updateLesson({ id: editingLessonId, lesson: lessonData });
+        updateLessonMutation.mutate({ id: editingLessonId, lesson: lessonData });
       } else {
-        await createLesson(formData);
+        createLessonMutation.mutate(formData);
       }
-      
-      setIsDialogOpen(false);
-      resetForm();
-      refetchLessons();
     } catch (error) {
       console.error("Error saving lesson:", error);
     }

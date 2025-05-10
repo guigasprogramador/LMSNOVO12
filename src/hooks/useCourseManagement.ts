@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Course } from "@/types";
 import { courseService } from "@/services/api";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAppData } from "@/contexts/AppDataContext";
 
 export interface CourseFormData {
   title: string;
@@ -25,30 +27,65 @@ const defaultFormData: CourseFormData = {
 };
 
 export function useCourseManagement() {
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState<CourseFormData>(defaultFormData);
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const { isAdmin } = useAuth();
+  const queryClient = useQueryClient();
+  
+  // Usar o contexto de dados da aplicação
+  const { 
+    courses, 
+    isLoadingCourses: isLoading,
+    refreshCourses,
+    addCourse,
+    updateCourseInState,
+    removeCourse
+  } = useAppData();
 
-  useEffect(() => {
-    fetchCourses();
-  }, []);
-
-  const fetchCourses = async () => {
-    try {
-      setIsLoading(true);
-      const coursesData = await courseService.getCourses();
-      setCourses(coursesData);
-    } catch (error) {
-      console.error("Error fetching courses:", error);
-      toast.error("Erro ao carregar os cursos");
-    } finally {
-      setIsLoading(false);
+  // Mutação para criar curso
+  const createCourseMutation = useMutation({
+    mutationFn: (courseData: any) => courseService.createCourse(courseData),
+    onSuccess: (newCourse) => {
+      toast.success("Curso criado com sucesso");
+      // Adicionar o novo curso ao estado local imediatamente
+      addCourse(newCourse);
+      setIsDialogOpen(false);
+      resetForm();
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao criar curso: ${error.message}`);
     }
-  };
+  });
+
+  // Mutação para atualizar curso
+  const updateCourseMutation = useMutation({
+    mutationFn: ({ courseId, courseData }: { courseId: string, courseData: any }) => 
+      courseService.updateCourse(courseId, courseData),
+    onSuccess: (_, variables) => {
+      toast.success("Curso atualizado com sucesso");
+      // Atualizar o estado local imediatamente
+      updateCourseInState(variables.courseId, variables.courseData);
+      setIsDialogOpen(false);
+      resetForm();
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao atualizar curso: ${error.message}`);
+    }
+  });
+
+  // Mutação para excluir curso
+  const deleteCourseMutation = useMutation({
+    mutationFn: (courseId: string) => courseService.deleteCourse(courseId),
+    onSuccess: (_, courseId) => {
+      toast.success("Curso excluído com sucesso");
+      // Remover o curso do estado local imediatamente
+      removeCourse(courseId);
+    },
+    onError: (error: any) => {
+      toast.error(`Erro ao excluir curso: ${error.message}`);
+    }
+  });
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -70,30 +107,18 @@ export function useCourseManagement() {
       return;
     }
 
-    setIsSubmitting(true);
+    const courseData = {
+      ...formData,
+      enrolledCount: formData.enrolledCount || 0,
+      rating: formData.rating || 0,
+      isEnrolled: false,
+      progress: 0
+    };
 
-    try {
-      const courseData = {
-        ...formData,
-        enrolledCount: formData.enrolledCount || 0,
-        rating: formData.rating || 0,
-      };
-
-      if (editingCourseId) {
-        await courseService.updateCourse(editingCourseId, courseData);
-        toast.success("Curso atualizado com sucesso");
-      } else {
-        await courseService.createCourse(courseData);
-        toast.success("Curso criado com sucesso");
-      }
-
-      setIsDialogOpen(false);
-      resetForm();
-      fetchCourses();
-    } catch (error: any) {
-      toast.error(`Erro ao salvar curso: ${error.message}`);
-    } finally {
-      setIsSubmitting(false);
+    if (editingCourseId) {
+      updateCourseMutation.mutate({ courseId: editingCourseId, courseData });
+    } else {
+      createCourseMutation.mutate(courseData);
     }
   };
 
@@ -111,7 +136,7 @@ export function useCourseManagement() {
     setIsDialogOpen(true);
   };
 
-  const handleDeleteCourse = async (courseId: string) => {
+  const handleDeleteCourse = (courseId: string) => {
     if (!isAdmin()) {
       toast.error("Você não tem permissão para excluir cursos");
       return;
@@ -121,13 +146,7 @@ export function useCourseManagement() {
       return;
     }
 
-    try {
-      await courseService.deleteCourse(courseId);
-      toast.success("Curso excluído com sucesso");
-      fetchCourses();
-    } catch (error: any) {
-      toast.error(`Erro ao excluir curso: ${error.message}`);
-    }
+    deleteCourseMutation.mutate(courseId);
   };
 
   const resetForm = () => {
@@ -137,12 +156,12 @@ export function useCourseManagement() {
 
   return {
     courses,
-    isLoading,
+    isLoading: isLoading || createCourseMutation.isPending || updateCourseMutation.isPending || deleteCourseMutation.isPending,
     isDialogOpen,
     setIsDialogOpen,
     formData,
     editingCourseId,
-    isSubmitting,
+    isSubmitting: createCourseMutation.isPending || updateCourseMutation.isPending,
     handleInputChange,
     handleEditCourse,
     handleDeleteCourse,

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Course, Certificate } from "@/types";
@@ -12,9 +12,22 @@ import { Badge } from "@/components/ui/badge";
 const Dashboard = () => {
   const { user } = useAuth();
   const { theme } = useTheme();
+  const navigate = useNavigate();
   const [enrolledCourses, setEnrolledCourses] = useState<Course[]>([]);
   const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  const handleNavigateToCourses = () => {
+    navigate("/courses");
+  };
+  
+  const handleNavigateToCompletedCourses = () => {
+    navigate("/courses", { state: { filter: "completed" } });
+  };
+  
+  const handleNavigateToCertificates = () => {
+    navigate("/certificates");
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -58,7 +71,10 @@ const Dashboard = () => {
 
       {/* Stats Overview */}
       <div className="grid gap-4 md:grid-cols-3">
-        <Card>
+        <Card 
+          className="cursor-pointer hover:shadow-md transition-shadow duration-200" 
+          onClick={handleNavigateToCourses}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Cursos em Andamento</CardTitle>
             <BookOpen className="h-4 w-4 text-muted-foreground" />
@@ -70,7 +86,10 @@ const Dashboard = () => {
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card 
+          className="cursor-pointer hover:shadow-md transition-shadow duration-200" 
+          onClick={handleNavigateToCompletedCourses}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Cursos Concluídos</CardTitle>
             <GraduationCap className="h-4 w-4 text-muted-foreground" />
@@ -82,7 +101,10 @@ const Dashboard = () => {
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card 
+          className="cursor-pointer hover:shadow-md transition-shadow duration-200" 
+          onClick={handleNavigateToCertificates}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Certificados</CardTitle>
             <Award className="h-4 w-4 text-muted-foreground" />

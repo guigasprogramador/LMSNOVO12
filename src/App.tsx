@@ -2,10 +2,13 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { AppDataProvider } from "./contexts/AppDataContext";
+import { useEffect } from "react";
+import { queryClient } from "./utils/queryClient";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
 import NetworkErrorBoundary from "./components/NetworkErrorBoundary";
@@ -28,18 +31,40 @@ import AdminProfiles from "./pages/admin/AdminProfiles";
 import AdminMakeUserAdmin from "./pages/admin/AdminMakeUserAdmin";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
+// Usando o queryClient global definido em utils/queryClient.ts
+
+// Wrapper component to initialize real-time subscriptions
+const RealtimeSubscriptionsInitializer = ({ children }: { children: React.ReactNode }) => {
+  useEffect(() => {
+    // Dynamically import to avoid circular dependencies
+    import('./utils/realtimeSubscriptions').then(({ initializeRealtimeSubscriptions }) => {
+      const unsubscribe = initializeRealtimeSubscriptions();
+      
+      // Clean up subscriptions when component unmounts
+      return () => {
+        if (unsubscribe) {
+          unsubscribe();
+        }
+      };
+    }).catch(error => {
+      console.error('Failed to initialize real-time subscriptions:', error);
+    });
+  }, []);
+  
+  return <>{children}</>;
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
       <AuthProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          {/* Use a simple div instead of NetworkErrorBoundary for diagnostic purposes */}
-          <div className="error-diagnostic-wrapper">
-            <BrowserRouter>
+        <AppDataProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            {/* Use a simple div instead of NetworkErrorBoundary for diagnostic purposes */}
+            <div className="error-diagnostic-wrapper">
+              <BrowserRouter>
               <Routes>
               {/* Public routes */}
               <Route path="/" element={<Index />} />
@@ -72,9 +97,10 @@ const App = () => (
               {/* 404 page */}
               <Route path="*" element={<NotFound />} />
               </Routes>
-            </BrowserRouter>
-          </div>
-        </TooltipProvider>
+              </BrowserRouter>
+            </div>
+          </TooltipProvider>
+        </AppDataProvider>
       </AuthProvider>
     </ThemeProvider>
   </QueryClientProvider>

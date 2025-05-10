@@ -62,12 +62,6 @@ const Navbar = () => {
                     Meus Cursos
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/profile" className="flex items-center gap-2">
-                    <UserIcon className="h-4 w-4" />
-                    Meu Perfil
-                  </Link>
-                </DropdownMenuItem>
                 {user.role === "admin" && (
                   <DropdownMenuItem asChild>
                     <Link to="/admin/dashboard" className="flex items-center gap-2">
