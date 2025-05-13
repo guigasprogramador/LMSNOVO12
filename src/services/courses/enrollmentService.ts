@@ -119,20 +119,43 @@ export const getEnrolledCourses = async (userId: string): Promise<Course[]> => {
 };
 
 /**
+ * Verificar se um usuário está matriculado em um curso específico
+ */
+export const checkEnrollment = async (courseId: string, userId: string) => {
+  console.log(`DIAGNÓSTICO: Verificando matrícula diretamente - courseId: ${courseId}, userId: ${userId}`);
+  try {
+    return await supabase
+      .from('enrollments')
+      .select('id, progress, enrolled_at')
+      .eq('user_id', userId)
+      .eq('course_id', courseId)
+      .maybeSingle();
+  } catch (error) {
+    console.error('DIAGNÓSTICO: Erro ao verificar matrícula:', error);
+    throw error;
+  }
+};
+
+/**
  * Enroll in a course (optimized)
  */
 export const enrollCourse = async (courseId: string, userId: string): Promise<{ success: boolean; message: string; enrollment?: any }> => {
   try {
-    // Verifica se já existe matrícula
-    const { data: existing, error: checkError } = await supabase
-      .from('enrollments')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('course_id', courseId)
-      .maybeSingle();
-    if (checkError) throw checkError;
+    // Verifica se já existe matrícula usando a função dedicada
+    const { data: existing, error: checkError } = await checkEnrollment(courseId, userId);
+    
+    if (checkError) {
+      console.error('DIAGNÓSTICO: Erro ao verificar matrícula:', checkError);
+      throw checkError;
+    }
+    
     if (existing) {
-      return { success: false, message: 'Você já está matriculado neste curso.' };
+      console.log(`DIAGNÓSTICO: Usuário já matriculado no curso: ${courseId}`);
+      return { 
+        success: true, 
+        message: 'Você já está matriculado neste curso. Redirecionando para a página do curso...', 
+        enrollment: existing 
+      };
     }
 
     // Cria matrícula

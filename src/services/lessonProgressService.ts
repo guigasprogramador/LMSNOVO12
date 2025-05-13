@@ -58,22 +58,68 @@ export const lessonProgressService = {
   },
 
   /**
-   * Marcar uma aula como concluída
+   * Marcar uma aula como concluída e atualizar o progresso do curso
    */
   async markLessonAsCompleted(userId: string, lessonId: string): Promise<LessonProgress> {
     try {
-      // Verificar se já existe um registro de progresso
-      const { data: existingProgress } = await supabase
+      console.log(`PROGRESSO: Iniciando marcação da aula ${lessonId} como concluída para o usuário ${userId}`);
+      
+      // Obter informações da aula para saber a qual curso ela pertence
+      const { data: lessonData, error: lessonError } = await supabase
+        .from('lessons')
+        .select('module_id')
+        .eq('id', lessonId)
+        .single();
+      
+      if (lessonError) {
+        console.error('PROGRESSO: Erro ao buscar detalhes da aula:', lessonError);
+        throw new Error('Falha ao obter detalhes da aula');
+      }
+      
+      if (!lessonData || !lessonData.module_id) {
+        console.error('PROGRESSO: Aula não encontrada ou módulo não associado');
+        throw new Error('Aula não encontrada ou módulo não associado');
+      }
+      
+      // Buscar o curso ao qual o módulo pertence
+      const { data: moduleData, error: moduleError } = await supabase
+        .from('modules')
+        .select('course_id')
+        .eq('id', lessonData.module_id)
+        .single();
+      
+      if (moduleError) {
+        console.error('PROGRESSO: Erro ao buscar detalhes do módulo:', moduleError);
+        throw new Error('Falha ao obter detalhes do módulo');
+      }
+      
+      if (!moduleData || !moduleData.course_id) {
+        console.error('PROGRESSO: Módulo não encontrado ou curso não associado');
+        throw new Error('Módulo não encontrado ou curso não associado');
+      }
+      
+      const courseId = moduleData.course_id;
+      console.log(`PROGRESSO: Aula pertence ao curso ${courseId}`);
+
+      // Verificar se já existe um registro de progresso para esta aula
+      const { data: existingProgress, error: checkError } = await supabase
         .from('lesson_progress')
         .select('*')
         .eq('user_id', userId)
         .eq('lesson_id', lessonId)
         .maybeSingle();
 
+      if (checkError) {
+        console.error('PROGRESSO: Erro ao verificar progresso existente:', checkError);
+        throw checkError;
+      }
+
       const now = new Date().toISOString();
-      
+      let progressResult;
+
       if (existingProgress) {
         // Atualizar o registro existente
+        console.log(`PROGRESSO: Atualizando registro existente de progresso para a aula ${lessonId}`);
         const { data, error } = await supabase
           .from('lesson_progress')
           .update({
@@ -84,9 +130,12 @@ export const lessonProgressService = {
           .select()
           .single();
 
-        if (error) throw error;
-        
-        return {
+        if (error) {
+          console.error('PROGRESSO: Erro ao atualizar progresso existente:', error);
+          throw error;
+        }
+
+        progressResult = {
           id: data.id,
           userId: data.user_id,
           lessonId: data.lesson_id,
@@ -95,6 +144,7 @@ export const lessonProgressService = {
         };
       } else {
         // Criar um novo registro
+        console.log(`PROGRESSO: Criando novo registro de progresso para a aula ${lessonId}`);
         const { data, error } = await supabase
           .from('lesson_progress')
           .insert({
@@ -106,9 +156,12 @@ export const lessonProgressService = {
           .select()
           .single();
 
-        if (error) throw error;
+        if (error) {
+          console.error('PROGRESSO: Erro ao criar novo registro de progresso:', error);
+          throw error;
+        }
         
-        return {
+        progressResult = {
           id: data.id,
           userId: data.user_id,
           lessonId: data.lesson_id,
@@ -116,8 +169,96 @@ export const lessonProgressService = {
           completedAt: data.completed_at
         };
       }
+      
+      // Recalcular e atualizar o progresso do curso imediatamente
+      try {
+        console.log(`PROGRESSO: Recalculando progresso do curso ${courseId}`);
+        
+        // Calcular o progresso atual do curso (buscar total de aulas e aulas concluídas)
+        // 1. Buscar todas as aulas do curso
+        const { data: modules } = await supabase
+          .from('modules')
+          .select('id')
+          .eq('course_id', courseId);
+        
+        if (!modules || modules.length === 0) {
+          console.log(`PROGRESSO: Nenhum módulo encontrado para o curso ${courseId}`);
+          return progressResult;
+        }
+        
+        const moduleIds = modules.map(m => m.id);
+        
+        // 2. Buscar todas as aulas dos módulos
+        const { data: lessons } = await supabase
+          .from('lessons')
+          .select('id')
+          .in('module_id', moduleIds);
+        
+        if (!lessons || lessons.length === 0) {
+          console.log(`PROGRESSO: Nenhuma aula encontrada para os módulos do curso ${courseId}`);
+          return progressResult;
+        }
+        
+        const totalLessons = lessons.length;
+        const lessonIds = lessons.map(l => l.id);
+        
+        // 3. Buscar aulas concluídas
+        const { data: completedLessons } = await supabase
+          .from('lesson_progress')
+          .select('lesson_id')
+          .eq('user_id', userId)
+          .eq('completed', true)
+          .in('lesson_id', lessonIds);
+        
+        const completedCount = completedLessons?.length || 0;
+        
+        // 4. Calcular progresso
+        const progress = totalLessons > 0 ? Math.round((completedCount / totalLessons) * 100) : 0;
+        console.log(`PROGRESSO: Progresso calculado para o curso ${courseId}: ${progress}% (${completedCount}/${totalLessons})`);
+        
+        // 5. Atualizar o progresso na tabela enrollments
+        const { error: enrollmentError } = await supabase
+          .from('enrollments')
+          .update({ progress })
+          .eq('user_id', userId)
+          .eq('course_id', courseId);
+        
+        if (enrollmentError) {
+          console.error('PROGRESSO: Erro ao atualizar progresso na tabela de matrículas:', enrollmentError);
+        } else {
+          console.log(`PROGRESSO: Progresso atualizado com sucesso na tabela de matrículas: ${progress}%`);
+        }
+        
+        // Se o curso foi concluído (progresso = 100%), verificar se precisa registrar a data de conclusão
+        if (progress === 100) {
+          console.log(`PROGRESSO: Curso ${courseId} concluído! Verificando se precisa registrar data de conclusão.`);
+          
+          const { data: enrollment } = await supabase
+            .from('enrollments')
+            .select('completed_at')
+            .eq('user_id', userId)
+            .eq('course_id', courseId)
+            .single();
+          
+          if (enrollment && !enrollment.completed_at) {
+            console.log(`PROGRESSO: Registrando data de conclusão para o curso ${courseId}.`);
+            
+            await supabase
+              .from('enrollments')
+              .update({ completed_at: now })
+              .eq('user_id', userId)
+              .eq('course_id', courseId);
+          }
+        }
+      } catch (progressError) {
+        // Não interromper o fluxo se houver erro no cálculo do progresso,
+        // apenas log para depuração
+        console.error('PROGRESSO: Erro ao calcular progresso do curso:', progressError);
+      }
+      
+      return progressResult;
     } catch (error) {
-      console.error('Erro ao marcar aula como concluída:', error);
+      console.error('PROGRESSO: Erro ao marcar aula como concluída:', error);
       throw new Error('Falha ao marcar aula como concluída');
     }
   },

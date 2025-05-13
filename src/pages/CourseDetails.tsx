@@ -9,10 +9,11 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { useAuth } from "@/contexts/AuthContext";
 import { Course } from "@/types";
 import { courseService } from "@/services";
-import * as enrollmentService from "@/services/courses/enrollmentService";
+import { enrollCourse, getEnrolledCourses, checkEnrollment } from "@/services/courses/enrollmentService";
 import { GraduationCap, Clock, Users, BookOpen, Play } from "lucide-react";
 import { toast } from "sonner";
 import LoadingWithFeedback from "@/components/LoadingWithFeedback";
+import { supabase } from "@/integrations/supabase/client";
 
 const CourseDetails = () => {
   const { courseId } = useParams<{ courseId: string }>();
@@ -27,27 +28,40 @@ const CourseDetails = () => {
     const fetchCourse = async () => {
       try {
         if (courseId) {
+          console.log(`DIAGNÓSTICO: Buscando detalhes do curso ${courseId}`);
           const courseData = await courseService.getCourseById(courseId);
           setCourse(courseData);
+          console.log('DIAGNÓSTICO: Dados do curso carregados:', courseData?.title);
           
           // Verificar se o usuário está matriculado no curso
           if (user) {
+            console.log(`DIAGNÓSTICO: Verificando matrícula do usuário ${user.id} no curso ${courseId}`);
+            
             try {
-              // Obter todos os cursos em que o usuário está matriculado
-              const enrolledCourses = await enrollmentService.getEnrolledCourses(user.id);
+              // Verificar diretamente no Supabase se o usuário está matriculado
+              const { data, error } = await checkEnrollment(courseId, user.id);
               
-              // Verificar se o curso atual está na lista de cursos matriculados
-              const isUserEnrolled = enrolledCourses.some(course => course.id === courseId);
-              setIsEnrolled(isUserEnrolled);
+              if (error) {
+                console.error('DIAGNÓSTICO: Erro ao verificar matrícula diretamente:', error);
+                // Tentar método alternativo
+                const enrolledCourses = await getEnrolledCourses(user.id);
+                const isUserEnrolled = enrolledCourses.some(course => course.id === courseId);
+                console.log(`DIAGNÓSTICO: Verificando com lista de cursos - Matriculado: ${isUserEnrolled}`);
+                setIsEnrolled(isUserEnrolled);
+              } else {
+                const isUserEnrolled = !!data;
+                console.log(`DIAGNÓSTICO: Verificar matrícula direta - Matriculado: ${isUserEnrolled}`);
+                setIsEnrolled(isUserEnrolled);
+              }
             } catch (enrollError) {
-              console.error("Erro ao verificar matrícula:", enrollError);
+              console.error("DIAGNÓSTICO: Erro ao verificar matrícula:", enrollError);
               // Se houver erro, assumimos que o usuário não está matriculado
               setIsEnrolled(false);
             }
           }
         }
       } catch (error) {
-        console.error("Error fetching course:", error);
+        console.error("DIAGNÓSTICO: Error fetching course:", error);
         toast.error("Erro ao carregar detalhes do curso");
         navigate("/courses");
       } finally {
@@ -67,7 +81,7 @@ const CourseDetails = () => {
     setIsEnrolling(true);
     try {
       if (courseId) {
-        const result = await enrollmentService.enrollCourse(courseId, user.id);
+        const result = await enrollCourse(courseId, user.id);
         
         if (result.success) {
           setIsEnrolled(true);

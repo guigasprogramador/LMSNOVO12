@@ -1,21 +1,31 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { moduleService, lessonService, lessonProgressService } from "@/services";
+import { useParams, useNavigate } from "react-router-dom";
+import { moduleService, lessonService, lessonProgressService, certificateService } from "@/services";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { Lesson, Module } from "@/types";
 import VideoPlayer from "@/components/VideoPlayer";
+import { supabase } from "@/integrations/supabase/client";
+import { CheckCircle, Award, ChevronRight } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const CoursePlayer = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [modules, setModules] = useState<Module[]>([]);
   const [selectedModule, setSelectedModule] = useState<Module | null>(null);
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [courseName, setCourseName] = useState('');
+  const [isEligibleForCertificate, setIsEligibleForCertificate] = useState(false);
+  const [showCongratulations, setShowCongratulations] = useState(false);
+  const [certificateId, setCertificateId] = useState<string | null>(null);
+  const [courseCompletedRecently, setCourseCompletedRecently] = useState(false);
 
   useEffect(() => {
     const fetchModulesAndLessons = async () => {
@@ -31,16 +41,63 @@ const CoursePlayer = () => {
       console.log('Carregando curso com ID:', id);
       
       try {
+        // Obter informações do curso
+        const { data: courseData } = await supabase
+          .from('courses')
+          .select('title')
+          .eq('id', id)
+          .single();
+        
+        if (courseData) {
+          setCourseName(courseData.title);
+        }
+        
+        // Obter o ID do usuário atual
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          throw new Error('Você precisa estar logado para acessar este curso');
+        }
+        
         // Obter os módulos do curso - as aulas já estão incluídas nesta resposta
         const mods = await moduleService.getModulesByCourseId(id);
         console.log('Módulos carregados:', mods);
         
+        // Buscar progresso das aulas para o usuário
+        const lessonsIds = mods.flatMap(module => 
+          module.lessons ? module.lessons.map(lesson => lesson.id) : []
+        );
+        
+        // Buscar aulas concluídas
+        const { data: completedLessons } = await supabase
+          .from('lesson_progress')
+          .select('lesson_id')
+          .eq('user_id', user.id)
+          .eq('completed', true)
+          .in('lesson_id', lessonsIds);
+        
+        // Criar um Set para busca rápida
+        const completedLessonsSet = new Set(
+          completedLessons?.map(item => item.lesson_id) || []
+        );
+        
+        console.log('Aulas concluídas:', completedLessonsSet);
+        
+        // Marcar aulas como concluídas nos módulos
+        const modsWithProgress = mods.map(module => ({
+          ...module,
+          lessons: module.lessons ? module.lessons.map(lesson => ({
+            ...lesson,
+            isCompleted: completedLessonsSet.has(lesson.id)
+          })) : []
+        }));
+        
         // Definir os módulos
-        setModules(mods);
+        setModules(modsWithProgress);
         
         // Selecionar o primeiro módulo e aula, se disponíveis
-        if (mods.length > 0) {
-          const firstModule = mods[0];
+        if (modsWithProgress.length > 0) {
+          const firstModule = modsWithProgress[0];
           setSelectedModule(firstModule);
           
           if (firstModule.lessons && firstModule.lessons.length > 0) {
@@ -54,7 +111,7 @@ const CoursePlayer = () => {
           console.warn('O curso não tem módulos');
         }
         
-        // Carregar o progresso do curso
+        // Carregar o progresso do curso e verificar elegibilidade para certificado
         fetchProgress();
       } catch (error) {
         console.error('Erro ao carregar módulos e aulas:', error);
@@ -72,25 +129,195 @@ const CoursePlayer = () => {
 
   const fetchProgress = async () => {
     try {
-      // Obter o ID do usuário atual
-      const userId = localStorage.getItem('userId');
+      // Obter o ID do usuário atual da sessão do Supabase
+      const { data: { user } } = await supabase.auth.getUser();
       
-      if (!userId || !id) {
+      if (!user?.id || !id) {
+        console.log('PROGRESSO: Não pode ser calculado - usuário não autenticado ou ID do curso ausente');
         setProgress(0);
         return;
       }
       
-      // Usar try/catch interno para evitar que erros interrompam o fluxo
+      console.log(`PROGRESSO: Buscando dados para curso ${id} e usuário ${user.id}`);
+      
+      // Obter informações do curso
       try {
-        const prog = await lessonProgressService.calculateCourseProgress(userId, id);
-        setProgress(prog || 0);
-      } catch {
-        // Silenciosamente falhar e definir progresso como 0
-        setProgress(0);
+        const { data: courseData } = await supabase
+          .from('courses')
+          .select('title')
+          .eq('id', id)
+          .single();
+        
+        if (courseData) {
+          setCourseName(courseData.title);
+        }
+      } catch (courseError) {
+        console.error('PROGRESSO: Erro ao buscar detalhes do curso:', courseError);
+      }
+      
+      // Verificar quantas aulas o curso tem no total
+      const { totalLessons, completedLessons } = countLessons();
+      console.log(`PROGRESSO: Contagem local: ${completedLessons}/${totalLessons} aulas concluídas`);
+      
+      // Abordagem 1: Calcular com base nas aulas concluídas da UI (resultado mais imediato)
+      const localProgress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
+      console.log(`PROGRESSO: Cálculo baseado na UI: ${localProgress}%`);
+      
+      // Se temos dados locais, usá-los primeiro para feedback imediato
+      if (localProgress > 0) {
+        setProgress(localProgress);
+      }
+      
+      // Armazenar o progresso anterior para comparação
+      const previousProgress = progress;
+      
+      // Abordagem 2: Buscar dados diretamente do banco
+      try {
+        // 1. Buscar progresso diretamente da tabela lesson_progress
+        const { data: lessonProgressData, error: lpError } = await supabase
+          .from('lesson_progress')
+          .select('lesson_id')
+          .eq('user_id', user.id)
+          .eq('completed', true);
+          
+        if (lpError) {
+          console.error('PROGRESSO: Erro ao buscar aulas concluídas:', lpError);
+        } else {
+          // 1. Primeiro, buscar todos os módulos do curso
+          const { data: courseModules, error: modulesError } = await supabase
+            .from('modules')
+            .select('id')
+            .eq('course_id', id);
+            
+          if (modulesError) {
+            console.error('PROGRESSO: Erro ao buscar módulos do curso:', modulesError);
+            return;
+          }
+          
+          if (!courseModules || courseModules.length === 0) {
+            console.log('PROGRESSO: Nenhum módulo encontrado para este curso');
+            return;
+          }
+            
+          const moduleIds = courseModules.map(module => module.id);
+          console.log(`PROGRESSO: Encontrados ${moduleIds.length} módulos para o curso ${id}`);
+            
+          // 2. Agora buscar todas as aulas desses módulos
+          const { data: courseLessons, error: clError } = await supabase
+            .from('lessons')
+            .select('id, module_id')
+            .in('module_id', moduleIds);
+            
+          if (clError) {
+            console.error('PROGRESSO: Erro ao buscar aulas do curso:', clError);
+          } else if (courseLessons && courseLessons.length > 0) {
+            // Filtrar apenas as aulas concluídas deste curso
+            const completedLessonIds = new Set(lessonProgressData?.map(item => item.lesson_id) || []);
+            const courseLessonIds = courseLessons.map(lesson => lesson.id);
+            
+            const completedCourseLesson = courseLessonIds.filter(id => completedLessonIds.has(id));
+            
+            const dbProgress = Math.round((completedCourseLesson.length / courseLessonIds.length) * 100);
+            console.log(`PROGRESSO: Cálculo do banco: ${dbProgress}% (${completedCourseLesson.length}/${courseLessonIds.length})`);
+            
+            // Atualizar o progresso na UI com o valor calculado do banco
+            setProgress(dbProgress);
+            
+            // Atualizar também a tabela de matrículas se houver discrepância
+            const { data: enrollmentData } = await supabase
+              .from('enrollments')
+              .select('progress')
+              .eq('user_id', user.id)
+              .eq('course_id', id)
+              .single();
+              
+            if (enrollmentData && enrollmentData.progress !== dbProgress) {
+              console.log(`PROGRESSO: Atualizando matrícula de ${enrollmentData.progress}% para ${dbProgress}%`);
+              
+              const { error: updateError } = await supabase
+                .from('enrollments')
+                .update({ progress: dbProgress })
+                .eq('user_id', user.id)
+                .eq('course_id', id);
+                
+              if (updateError) {
+                console.error('PROGRESSO: Erro ao atualizar matrícula:', updateError);
+              } else {
+                console.log('PROGRESSO: Matrícula atualizada com sucesso');
+              }
+            }
+            
+            // Verificar se o curso foi concluído
+            if (dbProgress === 100) {
+              // Verificar certificado quando o curso for concluído
+              console.log('PROGRESSO: Curso 100% concluído, verificando certificado...');
+              if (previousProgress < 100) {
+                setCourseCompletedRecently(true);
+              }
+              checkCertificateEligibility(user.id, id);
+            }
+            
+            return;
+          }
+        }
+        
+        // Se não conseguimos calcular com o método acima, tentar obter da tabela de matrículas
+        const { data: enrollmentData, error: enrollmentError } = await supabase
+          .from('enrollments')
+          .select('progress, completed_at')
+          .eq('user_id', user.id)
+          .eq('course_id', id)
+          .single();
+        
+        if (enrollmentError) {
+          console.error('PROGRESSO: Erro ao buscar matrícula:', enrollmentError);
+        } else if (enrollmentData) {
+          const enrollmentProgress = enrollmentData.progress || 0;
+          console.log(`PROGRESSO: Valor na matrícula: ${enrollmentProgress}%`);
+          
+          // Verificar se o valor da matrícula é maior que o calculado localmente
+          if (enrollmentProgress > localProgress) {
+            setProgress(enrollmentProgress);
+          }
+          
+          // Verificar se o curso foi concluído
+          if (enrollmentProgress === 100) {
+            if (previousProgress < 100) {
+              setCourseCompletedRecently(true);
+            }
+            checkCertificateEligibility(user.id, id);
+          }
+        }
+      } catch (dbError) {
+        console.error('PROGRESSO: Erro ao calcular com banco de dados:', dbError);
       }
     } catch (error) {
-      // Capturar qualquer outro erro e definir progresso como 0
+      console.error('PROGRESSO: Erro ao buscar progresso:', error);
       setProgress(0);
+    }
+  };
+  
+  const checkCertificateEligibility = async (userId: string, courseId: string) => {
+    try {
+      console.log('Verificando elegibilidade para certificado...');
+      const isEligible = await certificateService.isEligibleForCertificate(userId, courseId);
+      setIsEligibleForCertificate(isEligible);
+      
+      if (isEligible) {
+        // Buscar certificados existentes
+        const certificates = await certificateService.getCertificates(userId, courseId);
+        
+        if (certificates && certificates.length > 0) {
+          setCertificateId(certificates[0].id);
+        }
+        
+        // Se o curso foi concluído recentemente e o usuário é elegível, mostrar parabéns
+        if (courseCompletedRecently) {
+          setShowCongratulations(true);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao verificar elegibilidade para certificado:', error);
     }
   };
 
@@ -103,146 +330,340 @@ const CoursePlayer = () => {
     try {
       if (!selectedLesson) return;
       
-      // Obter o ID do usuário atual (você pode precisar ajustar isso com base na sua lógica de autenticação)
-      const userId = localStorage.getItem('userId') || 'current-user';
+      // Se a aula já está concluída, não faça nada
+      if (selectedLesson.isCompleted) {
+        return;
+      }
       
-      await lessonProgressService.markLessonAsCompleted(userId, selectedLesson.id);
-      toast.success("Aula marcada como concluída!");
-      fetchProgress();
+      // Obter o ID do usuário atual
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user || !user.id) {
+        toast.error("Você precisa estar logado para marcar aulas como concluídas");
+        return;
+      }
+      
+      console.log(`PROGRESSO: Marcando aula ${selectedLesson.id} como concluída para usuário ${user.id}...`);
+      
+      try {
+        // 1. Marcar a aula como concluída usando o serviço melhorado
+        await lessonProgressService.markLessonAsCompleted(user.id, selectedLesson.id);
+        
+        // 2. Atualizar a UI localmente
+        updateLessonStatus(selectedLesson.id, true);
+        
+        // 3. Calcular o progresso local para atualização imediata
+        const { totalLessons, completedLessons } = countLessons();
+        const calculatedProgress = Math.round((completedLessons / totalLessons) * 100);
+        console.log(`PROGRESSO: Cálculo local: ${calculatedProgress}% (${completedLessons}/${totalLessons})`);
+        
+        // 4. Atualizar a barra de progresso imediatamente
+        setProgress(calculatedProgress);
+        
+        // 5. Notificar o usuário
+        toast.success("Aula marcada como concluída!");
+        
+        // 6. Buscar progresso atualizado do servidor
+        setTimeout(() => {
+          console.log("PROGRESSO: Buscando progresso atualizado do servidor...");
+          fetchProgress();
+        }, 1000);
+        
+        // 7. Se o curso foi concluído, verificar certificado
+        if (calculatedProgress === 100) {
+          console.log("PROGRESSO: Curso 100% concluído! Verificando certificado...");
+          setCourseCompletedRecently(true);
+          checkCertificateEligibility(user.id, id || '');
+        }
+      } catch (progressError) {
+        console.error("PROGRESSO: Erro ao atualizar progresso:", progressError);
+        toast.error("Erro ao atualizar progresso");
+      }
     } catch (error) {
-      console.error('Erro ao marcar aula como concluída:', error);
+      console.error("PROGRESSO: Erro ao marcar aula como concluída:", error);
       toast.error("Erro ao marcar aula como concluída");
     }
   };
+  
+  // Contar total de aulas e aulas concluídas para cálculo rápido do progresso
+  const countLessons = () => {
+    let totalLessons = 0;
+    let completedLessons = 0;
+    
+    modules.forEach(module => {
+      if (module.lessons) {
+        totalLessons += module.lessons.length;
+        
+        module.lessons.forEach(lesson => {
+          if (lesson.isCompleted) {
+            completedLessons++;
+          }
+        });
+      }
+    });
+    
+    return { totalLessons, completedLessons };
+  };
+  
+  // Verifica se esta é a última aula não concluída no curso
+  const isThisTheLastIncompleteLesson = () => {
+    if (!modules || modules.length === 0) return false;
+    
+    let totalLessons = 0;
+    let completedLessons = 0;
+    
+    // Contar todas as aulas e as concluídas
+    modules.forEach(module => {
+      if (module.lessons) {
+        totalLessons += module.lessons.length;
+        completedLessons += module.lessons.filter(lesson => lesson.isCompleted).length;
+      }
+    });
+    
+    // Se esta for a penúltima aula concluída (ou seja, depois de marcar esta, todas estarão concluídas)
+    return completedLessons === totalLessons - 1;
+  };
+  
+  // Atualiza o status de conclusão da aula na UI
+  const updateLessonStatus = (lessonId: string, isCompleted: boolean) => {
+    // Atualizar a aula selecionada
+    if (selectedLesson && selectedLesson.id === lessonId) {
+      setSelectedLesson({
+        ...selectedLesson,
+        isCompleted
+      });
+    }
+    
+    // Atualizar a aula nos módulos
+    const updatedModules = modules.map(module => {
+      if (!module.lessons) return module;
+      
+      const updatedLessons = module.lessons.map(lesson => 
+        lesson.id === lessonId ? { ...lesson, isCompleted } : lesson
+      );
+      
+      return {
+        ...module,
+        lessons: updatedLessons
+      };
+    });
+    
+    setModules(updatedModules);
+  };
 
+  // Verificar se pode navegar para a aula anterior
+  const canGoToPreviousLesson = () => {
+    if (!selectedModule || !selectedLesson || !selectedModule.lessons) return false;
+    const currentLessonIdx = selectedModule.lessons.findIndex(l => l.id === selectedLesson.id);
+    return currentLessonIdx > 0;
+  };
+  
+  // Navegar para a aula anterior
+  const handlePreviousLesson = () => {
+    if (!selectedModule || !selectedLesson || !canGoToPreviousLesson()) return;
+    const currentLessonIdx = selectedModule.lessons.findIndex(l => l.id === selectedLesson.id);
+    setSelectedLesson(selectedModule.lessons[currentLessonIdx - 1]);
+  };
+  
+  // Verificar se pode navegar para a próxima aula
+  const canGoToNextLesson = () => {
+    if (!selectedModule || !selectedLesson || !selectedModule.lessons) return false;
+    const currentLessonIdx = selectedModule.lessons.findIndex(l => l.id === selectedLesson.id);
+    return currentLessonIdx < selectedModule.lessons.length - 1;
+  };
+  
+  // Navegar para a próxima aula
   const handleNextLesson = () => {
     if (!selectedModule || !selectedLesson) return;
+    
     const currentLessonIdx = selectedModule.lessons.findIndex(l => l.id === selectedLesson.id);
+    
     if (currentLessonIdx < selectedModule.lessons.length - 1) {
+      // Próxima aula no mesmo módulo
       setSelectedLesson(selectedModule.lessons[currentLessonIdx + 1]);
     } else {
+      // Tentar ir para o próximo módulo
       const currentModuleIdx = modules.findIndex(m => m.id === selectedModule.id);
-      if (currentModuleIdx < modules.length - 1 && modules[currentModuleIdx + 1].lessons.length > 0) {
-        setSelectedModule(modules[currentModuleIdx + 1]);
-        setSelectedLesson(modules[currentModuleIdx + 1].lessons[0]);
+      if (currentModuleIdx < modules.length - 1) {
+        const nextModule = modules[currentModuleIdx + 1];
+        setSelectedModule(nextModule);
+        if (nextModule.lessons && nextModule.lessons.length > 0) {
+          setSelectedLesson(nextModule.lessons[0]);
+        }
       }
     }
   };
 
   return (
     <div className="max-w-5xl mx-auto p-4 space-y-6">
-      <h1 className="text-3xl font-bold mb-2">Player de Aulas</h1>
-      
       {error ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
-          <strong className="font-bold">Erro! </strong>
-          <span className="block sm:inline">{error}</span>
-          <button
-            className="bg-red-100 hover:bg-red-200 text-red-700 font-bold py-1 px-2 rounded mt-2"
-            onClick={() => window.location.reload()}
-          >
-            Tentar novamente
-          </button>
+        <div className="p-4 mb-4 bg-red-100 border border-red-400 text-red-700 rounded">
+          {error}
+        </div>
+      ) : loading ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
         </div>
       ) : (
-        <Progress value={progress} className="mb-4" />
-      )}
-      <div className="flex gap-6">
-        <div className="w-1/3 space-y-4">
-          {modules.length === 0 ? (
-            <Card className="p-4">
-              <div className="text-center py-6">
-                <div className="rounded-full bg-gray-100 p-3 mx-auto w-fit mb-3">
-                  <svg className="h-6 w-6 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                  </svg>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Barra lateral com módulos e aulas */}
+          <div className="md:col-span-1">
+            <Card className="h-full max-h-[80vh] overflow-y-auto">
+              <div className="p-4">
+                <h2 className="text-xl font-bold mb-2">Módulos & Aulas</h2>
+                
+                {/* Progresso do curso - Melhorado */}
+                <div className="mb-4">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-sm font-medium">Seu progresso</span>
+                    <span className="text-sm font-medium">{progress}%</span>
+                  </div>
+                  <Progress value={progress} className="h-3" />
                 </div>
-                <h3 className="text-lg font-medium">Nenhum mu00f3dulo encontrado</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Este curso ainda nu00e3o possui mu00f3dulos ou aulas disponu00edveis.
-                </p>
-              </div>
-            </Card>
-          ) : (
-            modules.map((mod) => (
-              <Card key={mod.id} className="p-2">
-                <h2 className="font-semibold mb-2">{mod.title}</h2>
-                {mod.lessons && mod.lessons.length > 0 ? (
-                  <ul>
-                    {mod.lessons.map((lesson) => (
-                      <li key={lesson.id}>
-                        <Button
-                          variant={selectedLesson?.id === lesson.id ? "default" : "ghost"}
-                          className="w-full justify-start mb-1"
-                          onClick={() => handleSelectLesson(mod, lesson)}
+                
+                {/* Alerta quando curso está concluído */}
+                {progress === 100 && (
+                  <Alert className="mb-4 bg-green-50 border-green-200">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <AlertTitle className="text-green-800">Curso concluído!</AlertTitle>
+                    <AlertDescription className="text-green-700 text-sm">
+                      Você concluiu todas as aulas deste curso.
+                      {isEligibleForCertificate && (
+                        <Button 
+                          variant="link" 
+                          className="p-0 h-auto text-green-700 font-medium underline"
+                          onClick={goToCertificate}
                         >
-                          {lesson.title}
+                          Ver certificado
                         </Button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-muted-foreground italic p-2">
-                    Este mu00f3dulo ainda nu00e3o possui aulas.
-                  </p>
+                      )}
+                    </AlertDescription>
+                  </Alert>
                 )}
-              </Card>
-            ))
-          )}
-        </div>
-        <div className="flex-1">
-          {loading ? (
-            <Card className="p-6 flex justify-center items-center min-h-[300px]">
-              <div className="flex flex-col items-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
-                <p>Carregando aula...</p>
+                
+                <div className="space-y-2">
+                  {modules.map((module) => (
+                    <div key={module.id} className="border rounded-lg overflow-hidden">
+                      <div 
+                        className={`p-3 cursor-pointer ${
+                          selectedModule?.id === module.id 
+                            ? 'bg-primary text-white' 
+                            : 'bg-card hover:bg-muted'
+                        }`}
+                        onClick={() => setSelectedModule(module)}
+                      >
+                        <h3 className="font-medium">{module.title}</h3>
+                      </div>
+                      
+                      {selectedModule?.id === module.id && (
+                        <div className="p-2 border-t">
+                          {module.lessons && module.lessons.length > 0 ? (
+                            <ul className="space-y-1">
+                              {module.lessons.map((lesson) => (
+                                <li 
+                                  key={lesson.id}
+                                  className={`p-2 rounded cursor-pointer flex items-center justify-between ${
+                                    selectedLesson?.id === lesson.id 
+                                      ? 'bg-secondary text-secondary-foreground' 
+                                      : 'hover:bg-muted'
+                                  }`}
+                                  onClick={() => handleSelectLesson(module, lesson)}
+                                >
+                                  <span>{lesson.title}</span>
+                                  {lesson.isCompleted && (
+                                    <CheckCircle className="h-4 w-4 text-green-500 ml-2" />
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-sm text-muted-foreground p-2">Nenhuma aula disponível</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             </Card>
-          ) : !selectedLesson ? (
-            <Card className="p-6 flex flex-col items-center justify-center min-h-[300px] text-center">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-12 w-12 text-gray-400 mb-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
-                />
-              </svg>
-              <h3 className="text-lg font-medium mb-2">Nenhuma aula selecionada</h3>
-              <p className="text-sm text-muted-foreground max-w-md">
-                Selecione uma aula no menu ao lado para começar a assistir o conteúdo do curso.
-              </p>
-            </Card>
-          ) : (
-            <Card className="p-6">
-              <h2 className="text-xl font-bold mb-2">{selectedLesson.title}</h2>
-              <p className="mb-2 text-muted-foreground">{selectedLesson.description}</p>
-              {selectedLesson.videoUrl && (
-                <div className="mb-4">
-                  <VideoPlayer
-                    url={selectedLesson.videoUrl}
-                    title={selectedLesson.title}
-                    height={360}
-                  />
+          </div>
+          
+          {/* Conteúdo da aula */}
+          <div className="md:col-span-2">
+            {selectedLesson ? (
+              <div className="space-y-4">
+                <Card>
+                  <div className="p-4">
+                    <h1 className="text-2xl font-bold">{selectedLesson.title}</h1>
+                    {selectedModule && <p className="text-muted-foreground">Módulo: {selectedModule.title}</p>}
+                    
+                    {selectedLesson.videoUrl ? (
+                      <div className="mt-4">
+                        <VideoPlayer url={selectedLesson.videoUrl} />
+                      </div>
+                    ) : (
+                      <div className="mt-4 p-4 border rounded bg-muted">
+                        <p>Esta aula não possui vídeo.</p>
+                      </div>
+                    )}
+                    
+                    {selectedLesson.content && (
+                      <div className="mt-6 prose max-w-none">
+                        <h2 className="text-xl font-semibold mb-2">Conteúdo da Aula</h2>
+                        <div dangerouslySetInnerHTML={{ __html: selectedLesson.content }} />
+                      </div>
+                    )}
+                    
+                    <div className="mt-6 flex justify-between items-center">
+                      <Button 
+                        variant="outline" 
+                        onClick={handlePreviousLesson}
+                        disabled={!canGoToPreviousLesson()}
+                      >
+                        Aula Anterior
+                      </Button>
+                      
+                      <Button 
+                        onClick={handleMarkAsCompleted}
+                        className="bg-green-600 hover:bg-green-700 flex items-center gap-2"
+                        disabled={selectedLesson.isCompleted}
+                      >
+                        {selectedLesson.isCompleted ? (
+                          <>
+                            <CheckCircle className="h-4 w-4" />
+                            Aula Concluída
+                          </>
+                        ) : (
+                          <>Marcar como Concluída</>
+                        )}
+                      </Button>
+                      
+                      <Button 
+                        variant="default" 
+                        onClick={handleNextLesson}
+                        disabled={!canGoToNextLesson()}
+                        className="flex items-center gap-1"
+                      >
+                        Próxima Aula
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            ) : (
+              <Card>
+                <div className="p-6 text-center">
+                  <h2 className="text-xl font-semibold mb-2">Nenhuma aula selecionada</h2>
+                  <p className="text-muted-foreground">
+                    Selecione uma aula na barra lateral para começar a estudar.
+                  </p>
                 </div>
-              )}
-              {selectedLesson.content && (
-                <div className="mb-4">
-                  <div dangerouslySetInnerHTML={{ __html: selectedLesson.content }} />
-                </div>
-              )}
-              <Button onClick={handleMarkAsCompleted} className="mr-2">Marcar como concluída</Button>
-              <Button variant="outline" onClick={handleNextLesson}>Próxima aula</Button>
-            </Card>
-          )}
+              </Card>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

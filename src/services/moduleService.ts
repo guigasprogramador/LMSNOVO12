@@ -78,14 +78,68 @@ export const moduleService = {
   async getModulesByCourseId(courseId: string): Promise<Module[]> {
     if (!courseId) throw new Error('ID do curso é obrigatório');
 
-    // Chave de cache para este curso
-    const cacheKey = `modules_${courseId}`;
+    console.log(`DIAGNÓSTICO: Buscando módulos e aulas do curso ${courseId}...`);
     
-    // Tentar obter do cache primeiro, com expiração de 10 minutos
     try {
-      // Buscar diretamente do Supabase sem usar o cacheManager ou requestQueue
-      // para evitar problemas de throttling e cache que estão causando erros HTTP 400
-      console.log(`Buscando módulos do curso ${courseId} do servidor...`);
+      // Abordagem 1: Buscar modules e lessons em uma única consulta com join Foreign Keys
+      // Isso minimiza o número de requisições e contorna problemas de RLS
+      console.log(`Usando abordagem com join para buscar módulos e aulas do curso ${courseId}...`);
+      
+      // Busca otimizada que já traz módulos e aulas de uma vez
+      const { data: modulesWithLessonsData, error: modulesJoinError } = await supabase
+        .from('modules')
+        .select(`
+          id, title, description, order_number, course_id,
+          lessons:lessons(id, module_id, title, description, duration, video_url, content, order_number)
+        `)
+        .eq('course_id', courseId)
+        .order('order_number', { ascending: true });
+      
+      if (modulesJoinError) {
+        console.error(`DIAGNÓSTICO: Erro na abordagem com join:`, modulesJoinError);
+        // Se a abordagem com join falhar, tente a abordagem legada
+        console.log(`Voltando para abordagem legada de busca sequencial...`);
+      } else if (modulesWithLessonsData && modulesWithLessonsData.length > 0) {
+        console.log(`DIAGNÓSTICO: Join bem-sucedido! Encontrados ${modulesWithLessonsData.length} módulos`);
+        
+        // Processar os dados retornados pelo join
+        const processedModules: Module[] = modulesWithLessonsData.map(moduleData => {
+          // Ordenar lições por order_number
+          const sortedLessons = [...(moduleData.lessons || [])].sort((a, b) => 
+            (a.order_number || 0) - (b.order_number || 0)
+          );
+
+          console.log(`DIAGNÓSTICO: Módulo ${moduleData.title} tem ${sortedLessons.length} aulas`);
+          
+          // Criar objeto Module com as aulas ordenadas
+          return {
+            id: moduleData.id,
+            title: moduleData.title,
+            description: moduleData.description || '',
+            order: moduleData.order_number,
+            courseId: moduleData.course_id,
+            lessons: sortedLessons.map(lesson => ({
+              id: lesson.id,
+              moduleId: lesson.module_id,
+              title: lesson.title,
+              description: lesson.description || '',
+              duration: lesson.duration || '',
+              videoUrl: lesson.video_url || '',
+              content: lesson.content || '',
+              order: lesson.order_number,
+              isCompleted: false
+            }))
+          };
+        }).sort((a, b) => a.order - b.order);
+        
+        console.log(`DIAGNÓSTICO: Retornando ${processedModules.length} módulos com suas aulas`);
+        return processedModules;
+      } else {
+        console.log(`DIAGNÓSTICO: Nenhum módulo encontrado na abordagem com join`);
+      }
+      
+      // Abordagem 2 (fallback): Buscar primeiro os módulos e depois as aulas
+      console.log(`DIAGNÓSTICO: Tentando abordagem legada...`);
       
       const { data: modules, error: modulesError } = await supabase
         .from('modules')
@@ -94,77 +148,77 @@ export const moduleService = {
         .order('order_number', { ascending: true });
       
       if (modulesError) {
-        console.error(`Erro ao buscar módulos do curso ${courseId}:`, modulesError);
+        console.error(`DIAGNÓSTICO: Erro ao buscar módulos do curso ${courseId}:`, modulesError);
         return []; // Retornar array vazio em caso de erro em vez de lançar erro
       }
       
       if (!modules || modules.length === 0) {
-        console.log('Nenhum módulo encontrado para o curso:', courseId);
+        console.log('DIAGNÓSTICO: Nenhum módulo encontrado para o curso:', courseId);
         return []; // Retornar array vazio em vez de lançar erro
       }
+      
+      console.log(`DIAGNÓSTICO: Encontrados ${modules.length} módulos. Buscando aulas...`);
+      
+      // Processar módulos sequencialmente para evitar muitas requisições simultâneas
+      const modulesWithLessons: Module[] = [];
 
-          // Processar módulos sequencialmente para evitar muitas requisições simultâneas
-          const modulesWithLessons: Module[] = [];
-          
-          for (const module of modules) {
-            try {
-              // Buscar aulas diretamente do Supabase sem usar requestQueue
-              // para evitar problemas de throttling que estão causando erros HTTP 400
-              const { data: lessons, error: lessonsError } = await supabase
-                .from('lessons')
-                .select('id, module_id, title, description, duration, video_url, content, order_number')
-                .eq('module_id', module.id)
-                .order('order_number', { ascending: true });
-              
-              if (lessonsError) {
-                console.error(`Erro ao buscar aulas para o módulo ${module.id}:`, lessonsError);
-                // Continuar com lista vazia de aulas em vez de lançar erro
-                modulesWithLessons.push({
-                  id: module.id,
-                  title: module.title,
-                  description: module.description || '',
-                  order: module.order_number,
-                  courseId: module.course_id,
-                  lessons: []
-                });
-                continue;
-              }
-
-              modulesWithLessons.push({
-                id: module.id,
-                title: module.title,
-                description: module.description || '',
-                order: module.order_number,
-                courseId: module.course_id,
-                lessons: (lessons || []).map(lesson => ({
-                  id: lesson.id,
-                  moduleId: lesson.module_id,
-                  title: lesson.title,
-                  description: lesson.description || '',
-                  duration: lesson.duration || '',
-                  videoUrl: lesson.video_url || '',
-                  content: lesson.content || '',
-                  order: lesson.order_number,
-                  isCompleted: false
-                }))
-              });
-            } catch (error) {
-              console.error(`Erro ao processar módulo ${module.id}:`, error);
-              // Continuar com próximo módulo em vez de falhar completamente
-              modulesWithLessons.push({
-                id: module.id,
-                title: module.title,
-                description: module.description || '',
-                order: module.order_number,
-                courseId: module.course_id,
-                lessons: []
-              });
-            }
+      // Usar uma abordagem mais direta para buscar todas as aulas de uma vez
+      // em vez de fazer uma consulta por módulo
+      const moduleIds = modules.map(m => m.id);
+      
+      console.log(`DIAGNÓSTICO: Buscando aulas para ${moduleIds.length} módulos de uma vez...`);
+      
+      const { data: allLessons, error: allLessonsError } = await supabase
+        .from('lessons')
+        .select('id, module_id, title, description, duration, video_url, content, order_number')
+        .in('module_id', moduleIds)
+        .order('order_number', { ascending: true });
+        
+      if (allLessonsError) {
+        console.error(`DIAGNÓSTICO: Erro ao buscar todas as aulas:`, allLessonsError);
+      } else {
+        console.log(`DIAGNÓSTICO: Encontradas ${allLessons?.length || 0} aulas no total`);
+      }
+      
+      // Agrupar aulas por módulo
+      const lessonsByModule = new Map();
+      if (allLessons && allLessons.length > 0) {
+        allLessons.forEach(lesson => {
+          if (!lessonsByModule.has(lesson.module_id)) {
+            lessonsByModule.set(lesson.module_id, []);
           }
+          lessonsByModule.get(lesson.module_id).push(lesson);
+        });
+      }
+      
+      // Montar a estrutura final
+      for (const module of modules) {
+        const moduleLessons = lessonsByModule.get(module.id) || [];
+        console.log(`DIAGNÓSTICO: Módulo ${module.title} (${module.id}) tem ${moduleLessons.length} aulas`);
+        
+        modulesWithLessons.push({
+          id: module.id,
+          title: module.title,
+          description: module.description || '',
+          order: module.order_number,
+          courseId: module.course_id,
+          lessons: moduleLessons.map(lesson => ({
+            id: lesson.id,
+            moduleId: lesson.module_id,
+            title: lesson.title,
+            description: lesson.description || '',
+            duration: lesson.duration || '',
+            videoUrl: lesson.video_url || '',
+            content: lesson.content || '',
+            order: lesson.order_number,
+            isCompleted: false
+          }))
+        });
+      }
 
-          return modulesWithLessons.sort((a, b) => a.order - b.order);
+      return modulesWithLessons.sort((a, b) => a.order - b.order);
     } catch (error) {
-      console.error('Erro ao buscar módulos do curso:', error);
+      console.error('DIAGNÓSTICO: Erro ao buscar módulos do curso:', error);
       // Retornar array vazio em vez de lançar erro para evitar quebrar a UI
       return [];
     }
