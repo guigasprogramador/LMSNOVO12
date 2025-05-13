@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { AppDataProvider } from "./contexts/AppDataContext";
+import { CertificateProvider } from "./contexts/CertificateContext";
 import { useEffect } from "react";
 import { queryClient } from "./utils/queryClient";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -21,12 +22,14 @@ import CourseDetails from "./pages/CourseDetails";
 import CourseContent from "./pages/CourseContent";
 import Certificate from "./pages/Certificate";
 import CoursePlayer from "./pages/aluno/CoursePlayer";
+import MeusCertificados from "./pages/aluno/MeusCertificados";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminCourses from "./pages/admin/AdminCourses";
 import AdminModules from "./pages/admin/AdminModules";
 import AdminLessons from "./pages/admin/AdminLessons";
 import AdminUsers from "./pages/admin/AdminUsers";
 import AdminCertificates from "./pages/admin/AdminCertificates";
+import AdminCertificatesTest from "./pages/admin/AdminCertificatesTest";
 import AdminProfiles from "./pages/admin/AdminProfiles";
 import AdminMakeUserAdmin from "./pages/admin/AdminMakeUserAdmin";
 import NotFound from "./pages/NotFound";
@@ -59,7 +62,8 @@ const App = () => (
     <ThemeProvider>
       <AuthProvider>
         <AppDataProvider>
-          <TooltipProvider>
+          <CertificateProvider>
+            <TooltipProvider>
             <Toaster />
             <Sonner />
             {/* Use a simple div instead of NetworkErrorBoundary for diagnostic purposes */}
@@ -78,6 +82,7 @@ const App = () => (
                 <Route path="/courses/:courseId" element={<CourseDetails />} />
                 <Route path="/courses/:courseId/content" element={<CourseContent />} />
                 <Route path="/aluno/curso/:id/player" element={<CoursePlayer />} />
+                <Route path="/aluno/certificados" element={<MeusCertificados />} />
                 <Route path="/certificates/:certificateId" element={<Certificate />} />
               </Route>
               
@@ -91,6 +96,7 @@ const App = () => (
                 <Route path="/admin/users" element={<AdminUsers />} />
                 <Route path="/admin/make-admin" element={<AdminMakeUserAdmin />} />
                 <Route path="/admin/certificates" element={<AdminCertificates />} />
+                <Route path="/admin/certificates-test" element={<AdminCertificatesTest />} />
                 <Route path="/admin/profiles" element={<AdminProfiles />} />
               </Route>
               
@@ -99,7 +105,8 @@ const App = () => (
               </Routes>
               </BrowserRouter>
             </div>
-          </TooltipProvider>
+            </TooltipProvider>
+          </CertificateProvider>
         </AppDataProvider>
       </AuthProvider>
     </ThemeProvider>

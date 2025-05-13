@@ -18,7 +18,17 @@ const Dashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   
   const handleNavigateToCourses = () => {
-    navigate("/courses");
+    // Redirecionar para a seção "Meus Cursos" no dashboard
+    if (window.location.pathname === "/dashboard") {
+      // Se já estiver na página dashboard, apenas role para a seção
+      const myCoursesSection = document.getElementById("my-courses");
+      if (myCoursesSection) {
+        myCoursesSection.scrollIntoView({ behavior: "smooth" });
+      }
+    } else {
+      // Se estiver em outra página, navegue para dashboard com o hash
+      navigate("/dashboard#my-courses");
+    }
   };
   
   const handleNavigateToCompletedCourses = () => {
@@ -74,14 +84,15 @@ const Dashboard = () => {
         <Card 
           className="cursor-pointer hover:shadow-md transition-shadow duration-200" 
           onClick={handleNavigateToCourses}
+          data-component-name="_c8"
         >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Cursos em Andamento</CardTitle>
             <BookOpen className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{enrolledCourses.length}</div>
-            <p className="text-xs text-muted-foreground">
+            <div className="text-2xl font-bold" data-component-name="Dashboard">{enrolledCourses.length}</div>
+            <p className="text-xs text-muted-foreground" data-component-name="Dashboard">
               Cursos que você está matriculado
             </p>
           </CardContent>

@@ -1,6 +1,11 @@
 // Script para configurar corretamente a implantação na Vercel
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Obtém o __dirname no ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Garantir que o arquivo vercel.json existe
 if (!fs.existsSync(path.join(__dirname, 'vercel.json'))) {

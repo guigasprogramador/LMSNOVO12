@@ -28,6 +28,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -35,237 +36,100 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Module, Course } from "@/types";
-import { moduleService, courseService } from "@/services/api";
-import { toast } from "sonner";
 import { Plus, MoreHorizontal, Edit, Trash, BookOpen } from "lucide-react";
-
-interface ModuleFormData {
-  title: string;
-  description: string;
-  courseId: string;
-  order: number;
-}
-
-const defaultFormData: ModuleFormData = {
-  title: "",
-  description: "",
-  courseId: "",
-  order: 1,
-};
+import { toast } from "sonner";
+import { Course, Module } from "@/types";
+import { courseService } from "@/services/api";
+import { useModuleManagement } from "@/hooks/useModuleManagement";
+import { useAppData } from "@/contexts/AppDataContext";
+import { supabase } from "@/integrations/supabase/client";
 
 const AdminModules = () => {
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const coursePrefillId = queryParams.get("courseId");
   
-  const [modules, setModules] = useState<Module[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [selectedCourseId, setSelectedCourseId] = useState<string>(coursePrefillId || "");
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [formData, setFormData] = useState<ModuleFormData>({
-    ...defaultFormData,
-    courseId: coursePrefillId || "",
-  });
-  const [editingModuleId, setEditingModuleId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Usar o hook de gerenciamento de módulos
+  const {
+    modules,
+    isLoading: isLoadingModules,
+    isDialogOpen,
+    setIsDialogOpen,
+    formData,
+    editingModuleId,
+    isSubmitting,
+    handleInputChange,
+    handleEditModule,
+    handleDeleteModule,
+    handleSubmit,
+    resetForm,
+  } = useModuleManagement(selectedCourseId);
 
   useEffect(() => {
-    fetchData();
+    fetchCourses();
   }, []);
 
-  const fetchData = async () => {
+  const fetchCourses = async () => {
     try {
+      // Obter cursos
       const coursesData = await courseService.getCourses();
-      setCourses(coursesData);
       
-      if (selectedCourseId) {
-        fetchModulesByCourse(selectedCourseId);
-      } else {
-        // If no course is selected, show all modules
-        const allModules = await Promise.all(
-          coursesData.map((course) => moduleService.getModulesByCourseId(course.id))
-        );
-        setModules(allModules.flat());
-        setIsLoading(false);
-      }
-    } catch (error) {
-      console.error("Error fetching data:", error);
-      toast.error("Erro ao carregar dados");
+      // Obter contagem de matrículas para cada curso
+      const coursesWithEnrollmentCount = await Promise.all(coursesData.map(async (course) => {
+        try {
+          // Buscar matrículas para este curso
+          const { data: enrollments, error } = await supabase
+            .from('enrollments')
+            .select('id')
+            .eq('course_id', course.id);
+          
+          if (error) throw error;
+          
+          // Atualizar a contagem de alunos matriculados
+          return {
+            ...course,
+            enrolledCount: enrollments?.length || 0
+          };
+        } catch (err) {
+          console.error(`Erro ao buscar matrículas para o curso ${course.id}:`, err);
+          return course;
+        }
+      }));
+      
+      setCourses(coursesWithEnrollmentCount);
       setIsLoading(false);
-    }
-  };
-
-  const fetchModulesByCourse = async (courseId: string) => {
-    try {
-      const modulesData = await moduleService.getModulesByCourseId(courseId);
-      setModules(modulesData);
     } catch (error) {
-      console.error("Error fetching modules:", error);
-      toast.error("Erro ao carregar módulos");
-    } finally {
+      console.error("Error fetching courses:", error);
+      toast.error("Erro ao carregar cursos");
       setIsLoading(false);
     }
   };
 
   const handleCourseSelect = (courseId: string) => {
-    setSelectedCourseId(courseId);
-    fetchModulesByCourse(courseId);
+    // Se o valor for "all", definir como string vazia para compatibilidade com o hook
+    setSelectedCourseId(courseId === "all" ? "" : courseId);
   };
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-  ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
+  // Usar o contexto de dados da aplicação para carregar todos os módulos
+  const { loadAllModules } = useAppData();
 
-  const handleEditModule = (module: Module) => {
-    setFormData({
-      title: module.title,
-      description: module.description,
-      courseId: module.courseId,
-      order: module.order,
-    });
-    setEditingModuleId(module.id);
-    setIsDialogOpen(true);
-  };
+  // Carregar todos os módulos quando a página for montada
+  useEffect(() => {
+    // Carregar todos os módulos ao inicializar a página
+    loadAllModules();
+  }, [loadAllModules]);
 
-  const handleDeleteModule = async (moduleId: string) => {
-    if (confirm("Tem certeza de que deseja excluir este módulo?")) {
-      try {
-        await moduleService.deleteModule(moduleId);
-        toast.success("Módulo excluído com sucesso");
-        
-        // Remover o módulo do estado local imediatamente
-        setModules(prevModules => prevModules.filter(module => module.id !== moduleId));
-        
-        // Atualizar os dados em segundo plano para garantir sincronização
-        setTimeout(() => {
-          if (selectedCourseId) {
-            fetchModulesByCourse(selectedCourseId);
-          } else {
-            fetchData();
-          }
-        }, 1000); // Atraso de 1 segundo para dar tempo à UI de renderizar primeiro
-      } catch (error) {
-        console.error("Error deleting module:", error);
-        toast.error("Erro ao excluir o módulo");
-      }
+  // Atualizar o curso selecionado no hook quando mudar
+  useEffect(() => {
+    if (selectedCourseId && formData) {
+      // O resetForm do hook já será chamado quando o curso mudar
+      // porque o useModuleManagement recebe o selectedCourseId como parâmetro
     }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!formData.title.trim()) {
-      toast.error("Título do módulo é obrigatório");
-      return;
-    }
-    if (!formData.courseId) {
-      toast.error("Selecione um curso para o módulo");
-      return;
-    }
-    
-    // Criar um ID temporário para o novo módulo
-    const tempId = `temp-${Date.now()}`;
-    
-    // Se estiver criando um novo módulo, adicione-o imediatamente ao estado com um ID temporário
-    if (!editingModuleId) {
-      const tempModule: Module = {
-        id: tempId,
-        title: formData.title.trim(),
-        description: formData.description?.trim() || '',
-        order: Number(formData.order) || 1,
-        courseId: formData.courseId,
-        lessons: []
-      };
-      
-      // Adicionar o módulo temporário ao estado imediatamente
-      console.log('Adicionando módulo temporário ao estado:', tempModule);
-      setModules(prevModules => [...prevModules, tempModule]);
-    }
-    
-    setIsLoading(true);
-    try {
-      if (editingModuleId) {
-        // Atualizar módulo existente
-        const updatedModuleData = {
-          title: formData.title.trim(),
-          description: formData.description?.trim() || '',
-          order: Number(formData.order) || 1,
-        };
-        
-        await moduleService.updateModule(editingModuleId, updatedModuleData);
-        toast.success("Módulo atualizado com sucesso");
-        
-        // Atualizar o módulo no estado local imediatamente
-        setModules(prevModules => 
-          prevModules.map(module => 
-            module.id === editingModuleId 
-              ? { ...module, ...updatedModuleData }
-              : module
-          )
-        );
-      } else {
-        // Criar novo módulo
-        const moduleData = {
-          title: formData.title.trim(),
-          description: formData.description?.trim() || '',
-          order: Number(formData.order) || 1,
-        };
-        
-        const newModule = await moduleService.createModule(formData.courseId, moduleData);
-        toast.success("Módulo criado com sucesso");
-        
-        // Substituir o módulo temporário pelo módulo real
-        setModules(prevModules => 
-          prevModules.map(module => 
-            module.id === tempId 
-              ? {
-                  id: newModule.id,
-                  title: newModule.title,
-                  description: newModule.description || '',
-                  order: newModule.order,
-                  courseId: newModule.courseId,
-                  lessons: []
-                }
-              : module
-          )
-        );
-      }
-      
-      setIsDialogOpen(false);
-      setFormData({ ...defaultFormData, courseId: selectedCourseId });
-      setEditingModuleId(null);
-      
-      // Atualizar os dados em segundo plano para garantir sincronização
-      setTimeout(() => {
-        if (selectedCourseId) {
-          fetchModulesByCourse(selectedCourseId);
-        } else {
-          fetchData();
-        }
-      }, 1000); // Atraso de 1 segundo para dar tempo à UI de renderizar primeiro
-    } catch (error: any) {
-      // Se ocorrer um erro e estiver criando um novo módulo, remova o módulo temporário
-      if (!editingModuleId) {
-        setModules(prevModules => prevModules.filter(module => module.id !== tempId));
-      }
-      toast.error(error.message || "Erro ao salvar o módulo");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      ...defaultFormData,
-      courseId: selectedCourseId,
-    });
-    setEditingModuleId(null);
-  };
+  }, [selectedCourseId, formData]);
 
   return (
     <div className="space-y-8 px-4 py-8 max-w-6xl mx-auto">
@@ -297,13 +161,11 @@ const AdminModules = () => {
               <div className="space-y-2">
                 <Label htmlFor="courseId">Curso</Label>
                 <Select
-                  value={formData.courseId}
-                  onValueChange={(value) => 
-                    setFormData((prev) => ({ ...prev, courseId: value }))
-                  }
-                  required
+                  value={selectedCourseId}
+                  onValueChange={handleCourseSelect}
+                  disabled={!!editingModuleId}
                 >
-                  <SelectTrigger id="courseId" className="rounded-md">
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="Selecione um curso" />
                   </SelectTrigger>
                   <SelectContent>
@@ -367,7 +229,7 @@ const AdminModules = () => {
       <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
         <div className="w-full sm:w-[320px]">
           <Label htmlFor="filterCourse">Filtrar por Curso</Label>
-          <Select value={selectedCourseId} onValueChange={handleCourseSelect}>
+          <Select value={selectedCourseId || "all"} onValueChange={handleCourseSelect}>
             <SelectTrigger id="filterCourse" className="w-full rounded-md">
               <SelectValue placeholder="Todos os cursos" />
             </SelectTrigger>
@@ -397,13 +259,14 @@ const AdminModules = () => {
                   <TableHead className="py-3 px-4 text-left font-semibold text-gray-700 dark:text-gray-200">Título</TableHead>
                   <TableHead className="py-3 px-4 text-left font-semibold text-gray-700 dark:text-gray-200">Curso</TableHead>
                   <TableHead className="py-3 px-4 text-left font-semibold text-gray-700 dark:text-gray-200">Aulas</TableHead>
+                  <TableHead className="py-3 px-4 text-left font-semibold text-gray-700 dark:text-gray-200">Alunos</TableHead>
                   <TableHead className="py-3 px-4 text-center font-semibold text-gray-700 dark:text-gray-200 w-[120px]">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {modules.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-6 text-gray-500">
+                    <TableCell colSpan={6} className="text-center py-6 text-gray-500">
                       {selectedCourseId
                         ? "Este curso ainda não possui módulos"
                         : "Nenhum módulo encontrado"}
@@ -420,6 +283,11 @@ const AdminModules = () => {
                         <TableCell className="py-3 px-4">
                           <Badge variant="outline" className="rounded-full px-3 py-1 text-sm bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900 dark:text-blue-100 dark:border-blue-700">
                             {module.lessons.length}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="py-3 px-4">
+                          <Badge variant="outline" className="rounded-full px-3 py-1 text-sm bg-green-50 text-green-700 border-green-200 dark:bg-green-900 dark:text-green-100 dark:border-green-700" data-component-name="Badge">
+                            {course ? course.enrolledCount : 0}
                           </Badge>
                         </TableCell>
                         <TableCell className="py-3 px-4 text-center">

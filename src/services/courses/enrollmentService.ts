@@ -175,3 +175,29 @@ export const updateCourseProgress = async (courseId: string, userId: string, pro
     throw error;
   }
 };
+
+/**
+ * Get users enrolled in a course
+ */
+export const getEnrolledUsers = async (courseId: string) => {
+  try {
+    // Buscar matrículas para este curso
+    const { data: enrollments, error } = await supabase
+      .from('enrollments')
+      .select('user_id, progress, enrolled_at')
+      .eq('course_id', courseId);
+    
+    if (error) throw error;
+    if (!enrollments || enrollments.length === 0) return [];
+    
+    // Retornar IDs dos usuários matriculados
+    return enrollments.map(enrollment => ({
+      userId: enrollment.user_id,
+      progress: enrollment.progress || 0,
+      enrolledAt: enrollment.enrolled_at
+    }));
+  } catch (error) {
+    console.error('Error fetching enrolled users:', error);
+    return [];
+  }
+};

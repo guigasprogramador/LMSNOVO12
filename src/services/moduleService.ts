@@ -6,6 +6,7 @@ import { cacheManager } from '@/utils/cacheManager';
 export const moduleService = {
   async getAllModules(): Promise<Module[]> {
     try {
+      // Primeiro, buscar todos os módulos
       const { data, error } = await supabase
         .from('modules')
         .select('id, title, description, order_number, course_id')
@@ -14,14 +15,60 @@ export const moduleService = {
       if (error) throw error;
       if (!data) throw new Error('Nenhum módulo encontrado');
 
-      return data.map(module => ({
-        id: module.id,
-        title: module.title,
-        description: module.description || '',
-        order: module.order_number,
-        courseId: module.course_id,
-        lessons: []
+      // Para cada módulo, buscar suas aulas
+      const modulesWithLessons = await Promise.all(data.map(async (module) => {
+        try {
+          // Buscar aulas para este módulo
+          const { data: lessons, error: lessonsError } = await supabase
+            .from('lessons')
+            .select('id, module_id, title, description, duration, video_url, content, order_number')
+            .eq('module_id', module.id)
+            .order('order_number', { ascending: true });
+
+          if (lessonsError) {
+            console.error(`Erro ao buscar aulas para o módulo ${module.id}:`, lessonsError);
+            return {
+              id: module.id,
+              title: module.title,
+              description: module.description || '',
+              order: module.order_number,
+              courseId: module.course_id,
+              lessons: []
+            };
+          }
+
+          return {
+            id: module.id,
+            title: module.title,
+            description: module.description || '',
+            order: module.order_number,
+            courseId: module.course_id,
+            lessons: (lessons || []).map(lesson => ({
+              id: lesson.id,
+              moduleId: lesson.module_id,
+              title: lesson.title,
+              description: lesson.description || '',
+              duration: lesson.duration || '',
+              videoUrl: lesson.video_url || '',
+              content: lesson.content || '',
+              order: lesson.order_number,
+              isCompleted: false
+            }))
+          };
+        } catch (error) {
+          console.error(`Erro ao processar módulo ${module.id}:`, error);
+          return {
+            id: module.id,
+            title: module.title,
+            description: module.description || '',
+            order: module.order_number,
+            courseId: module.course_id,
+            lessons: []
+          };
+        }
       }));
+
+      return modulesWithLessons;
     } catch (error) {
       console.error('Erro ao buscar módulos:', error);
       throw new Error('Falha ao buscar módulos');

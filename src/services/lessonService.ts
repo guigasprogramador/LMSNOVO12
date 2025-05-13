@@ -61,7 +61,8 @@ export const lessonService = {
       if (error) throw error;
       if (!data) throw new Error('Nenhum dado retornado após criar a aula');
 
-      return {
+      // Criamos um objeto Lesson completo para retornar
+      const newLesson: Lesson = {
         id: data.id,
         moduleId: data.module_id,
         title: data.title,
@@ -72,6 +73,14 @@ export const lessonService = {
         order: data.order_number,
         isCompleted: false
       };
+      
+      // Adicionamos propriedades adicionais para compatibilidade com a interface do AdminLessons
+      // Essas propriedades não fazem parte do tipo Lesson, mas são usadas na interface
+      (newLesson as any).order_number = data.order_number;
+      (newLesson as any).video_url = data.video_url || '';
+      (newLesson as any).module_id = data.module_id;
+
+      return newLesson;
     } catch (error) {
       console.error('Erro ao criar aula:', error);
       throw new Error('Falha ao criar aula');
@@ -85,7 +94,8 @@ export const lessonService = {
     videoUrl?: string;
     content?: string;
     order?: number;
-  }): Promise<void> {
+    moduleId?: string;
+  }): Promise<Lesson> {
     if (!lessonId) throw new Error('ID da aula é obrigatório');
 
     const updates: Record<string, any> = {};
@@ -117,13 +127,40 @@ export const lessonService = {
       updates.order_number = lessonData.order;
     }
 
+    if (lessonData.moduleId !== undefined) {
+      updates.module_id = lessonData.moduleId;
+    }
+
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('lessons')
         .update(updates)
-        .eq('id', lessonId);
+        .eq('id', lessonId)
+        .select('id, module_id, title, description, duration, video_url, content, order_number')
+        .single();
 
       if (error) throw error;
+      if (!data) throw new Error('Nenhum dado retornado após atualizar a aula');
+
+      // Criamos um objeto Lesson completo para retornar
+      const updatedLesson: Lesson = {
+        id: data.id,
+        moduleId: data.module_id,
+        title: data.title,
+        description: data.description || '',
+        duration: data.duration || '',
+        videoUrl: data.video_url || '',
+        content: data.content || '',
+        order: data.order_number,
+        isCompleted: false
+      };
+      
+      // Adicionamos propriedades adicionais para compatibilidade com a interface do AdminLessons
+      (updatedLesson as any).order_number = data.order_number;
+      (updatedLesson as any).video_url = data.video_url || '';
+      (updatedLesson as any).module_id = data.module_id;
+
+      return updatedLesson;
     } catch (error) {
       console.error('Erro ao atualizar aula:', error);
       throw new Error('Falha ao atualizar aula');

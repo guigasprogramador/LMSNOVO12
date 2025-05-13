@@ -14,6 +14,7 @@ interface AppDataContextType {
   getModulesByCourseId: (courseId: string) => Module[];
   isLoadingModules: boolean;
   refreshModules: (courseId: string) => Promise<void>;
+  loadAllModules: () => Promise<void>;
   addModule: (module: Module) => void;
   updateModuleInState: (moduleId: string, updatedModule: Partial<Module>) => void;
   removeModule: (moduleId: string) => void;
@@ -162,6 +163,11 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Funções para obter dados filtrados
   const getModulesByCourseId = useCallback((courseId: string) => {
+    // Se courseId for vazio ou 'all', retornar todos os módulos
+    if (!courseId || courseId === 'all') {
+      return modules;
+    }
+    // Caso contrário, filtrar por courseId
     return modules.filter(module => module.courseId === courseId);
   }, [modules]);
 
@@ -169,9 +175,26 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return lessons.filter(lesson => lesson.moduleId === moduleId);
   }, [lessons]);
 
+  // Função para carregar todos os módulos
+  const loadAllModules = useCallback(async () => {
+    try {
+      setIsLoadingModules(true);
+      console.log('Carregando todos os módulos...');
+      const allModules = await moduleService.getAllModules();
+      console.log('Todos os módulos carregados:', allModules);
+      setModules(allModules);
+    } catch (error) {
+      console.error('Erro ao carregar todos os módulos:', error);
+    } finally {
+      setIsLoadingModules(false);
+    }
+  }, []);
+
   // Inicializar dados e configurar inscrições em tempo real
   useEffect(() => {
+    // Carregar cursos e todos os módulos ao inicializar
     refreshCourses();
+    loadAllModules();
 
     // Configurar inscrições em tempo real do Supabase
     const coursesChannel = supabase
@@ -239,6 +262,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     getModulesByCourseId,
     isLoadingModules,
     refreshModules,
+    loadAllModules,
     addModule,
     updateModuleInState,
     removeModule,

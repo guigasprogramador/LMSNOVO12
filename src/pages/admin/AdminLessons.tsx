@@ -141,7 +141,7 @@ const AdminLessons = () => {
     setIsLoading(true);
     try {
       if (editingLessonId) {
-        await lessonService.updateLesson(editingLessonId, {
+        const updatedLesson = await lessonService.updateLesson(editingLessonId, {
           title: formData.title.trim(),
           description: formData.description?.trim() || '',
           duration: formData.duration?.trim() || '',
@@ -151,8 +151,15 @@ const AdminLessons = () => {
           moduleId: selectedModuleId,
         });
         toast.success("Aula atualizada com sucesso");
+        
+        // Atualizar o estado local imediatamente com a aula retornada pelo serviço
+        setLessons(prevLessons => 
+          prevLessons.map(lesson => 
+            lesson.id === editingLessonId ? updatedLesson : lesson
+          )
+        );
       } else {
-        await lessonService.createLesson(selectedModuleId, {
+        const newLesson = await lessonService.createLesson(selectedModuleId, {
           title: formData.title.trim(),
           description: formData.description?.trim() || '',
           duration: formData.duration?.trim() || '',
@@ -161,11 +168,13 @@ const AdminLessons = () => {
           content: formData.content?.trim() || '',
         });
         toast.success("Aula criada com sucesso");
+        
+        // Adicionar a nova aula ao estado local imediatamente
+        setLessons(prevLessons => [...prevLessons, newLesson]);
       }
       setIsDialogOpen(false);
       setFormData({ ...defaultFormData });
       setEditingLessonId(null);
-      fetchModuleAndLessons(selectedModuleId);
     } catch (error) {
       toast.error(error.message || "Erro ao salvar a aula");
     } finally {
