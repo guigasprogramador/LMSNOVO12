@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
-import { lessonService, moduleService } from "@/services/api";
+import { lessonService, moduleService, courseService } from "@/services/api";
 import { toast } from "sonner";
 import { Plus, MoreHorizontal, Edit, Trash } from "lucide-react";
 import {
@@ -54,37 +55,159 @@ const AdminLessons = () => {
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const moduleIdFromUrl = queryParams.get("moduleId") || "";
+  const courseIdFromUrl = queryParams.get("courseId") || "";
 
   const [lessons, setLessons] = useState([]);
   const [module, setModule] = useState(null);
   const [allModules, setAllModules] = useState([]);
+  const [filteredModules, setFilteredModules] = useState([]);
+  const [courses, setCourses] = useState([]);
+  const [selectedCourseId, setSelectedCourseId] = useState(courseIdFromUrl);
+  const [selectedModuleId, setSelectedModuleId] = useState(moduleIdFromUrl);
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [formData, setFormData] = useState({ ...defaultFormData });
   const [editingLessonId, setEditingLessonId] = useState(null);
 
+  // Carregar todos os cursos - otimizado para carregar mais rápido
   useEffect(() => {
-    moduleService.getAllModules().then(setAllModules).catch(() => setAllModules([]));
+    const fetchCourses = async () => {
+      setIsLoading(true);
+      try {
+        // Usando o Supabase diretamente para uma consulta mais rápida
+        const { data, error } = await supabase
+          .from('courses')
+          .select('id, title')
+          .order('title');
+        
+        if (error) throw error;
+        
+        setCourses(data || []);
+        console.log('Cursos carregados:', data?.length || 0, 'cursos');
+      } catch (error) {
+        console.error('Erro ao carregar cursos:', error);
+        toast.error('Erro ao carregar cursos');
+        setCourses([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchCourses();
   }, []);
-
+  
+  // Carregar módulos do curso selecionado - otimizado
   useEffect(() => {
-    if (moduleIdFromUrl) {
-      fetchModuleAndLessons(moduleIdFromUrl);
+    const fetchModulesByCourse = async () => {
+      if (!selectedCourseId) {
+        setFilteredModules([]);
+        return;
+      }
+      
+      setIsLoading(true);
+      try {
+        // Consulta direta ao Supabase para módulos do curso selecionado
+        const { data, error } = await supabase
+          .from('modules')
+          .select('id, title, course_id, order_number')
+          .eq('course_id', selectedCourseId)
+          .order('order_number');
+        
+        if (error) throw error;
+        
+        // Mapear para o formato esperado
+        const modules = (data || []).map(m => ({
+          id: m.id,
+          title: m.title,
+          courseId: m.course_id,
+          order: m.order_number
+        }));
+        
+        setFilteredModules(modules);
+        console.log('Módulos filtrados:', modules.length, 'para o curso', selectedCourseId);
+        
+        // Se temos módulos e nenhum está selecionado, selecionamos o primeiro
+        if (modules.length > 0 && !selectedModuleId) {
+          setSelectedModuleId(modules[0].id);
+          fetchModuleAndLessons(modules[0].id);
+        }
+      } catch (error) {
+        console.error('Erro ao carregar módulos do curso:', error);
+        toast.error('Erro ao carregar módulos');
+        setFilteredModules([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchModulesByCourse();
+  }, [selectedCourseId]);
+
+  // Este useEffect foi removido pois a funcionalidade foi movida para o fetchModulesByCourse acima
+  
+  // Quando o módulo selecionado muda, carregamos suas aulas
+  useEffect(() => {
+    if (selectedModuleId) {
+      fetchModuleAndLessons(selectedModuleId);
     } else {
       setLessons([]);
       setModule(null);
     }
-  }, [moduleIdFromUrl]);
+  }, [selectedModuleId]);
 
   const fetchModuleAndLessons = async (moduleId) => {
+    if (!moduleId) return;
+    
     setIsLoading(true);
     try {
-      const mod = allModules.find((m) => m.id === moduleId);
-      setModule(mod || null);
-      const lessonsData = await lessonService.getLessonsByModuleId(moduleId);
-      setLessons(lessonsData);
+      // Buscar informações do módulo diretamente do Supabase
+      const { data: moduleData, error: moduleError } = await supabase
+        .from('modules')
+        .select('id, title, description, course_id, order_number')
+        .eq('id', moduleId)
+        .single();
+      
+      if (moduleError) throw moduleError;
+      
+      // Mapear para o formato esperado
+      const mod = moduleData ? {
+        id: moduleData.id,
+        title: moduleData.title,
+        description: moduleData.description || '',
+        courseId: moduleData.course_id,
+        order: moduleData.order_number
+      } : null;
+      
+      setModule(mod);
+      
+      // Buscar aulas diretamente do Supabase para melhor performance
+      const { data: lessonsData, error: lessonsError } = await supabase
+        .from('lessons')
+        .select('id, title, description, video_url, content, order_number, module_id, duration')
+        .eq('module_id', moduleId)
+        .order('order_number');
+      
+      if (lessonsError) throw lessonsError;
+      
+      // Mapear para o formato esperado
+      const lessons = (lessonsData || []).map(lesson => ({
+        id: lesson.id,
+        title: lesson.title,
+        description: lesson.description || '',
+        videoUrl: lesson.video_url || '',
+        content: lesson.content || '',
+        order: lesson.order_number,
+        moduleId: lesson.module_id,
+        duration: lesson.duration || ''
+      }));
+      
+      setLessons(lessons);
+      console.log(`Carregadas ${lessons.length} aulas para o módulo ${moduleId}`);
     } catch (error) {
+      console.error('Erro ao carregar dados do módulo ou aulas:', error);
       toast.error("Erro ao carregar dados do módulo ou aulas");
+      setModule(null);
+      setLessons([]);
     } finally {
       setIsLoading(false);
     }
@@ -95,7 +218,28 @@ const AdminLessons = () => {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  const handleCourseSelect = (value) => {
+    // Limpar estado atual antes de carregar novos dados
+    setLessons([]);
+    setModule(null);
+    setFilteredModules([]);
+    
+    // Mostrar feedback visual imediato
+    toast.info("Carregando módulos do curso...", {
+      duration: 2000,
+      id: "loading-modules"
+    });
+    
+    // Atualizar o curso selecionado (isso vai disparar o useEffect que carrega os módulos)
+    setSelectedCourseId(value);
+    
+    // Ao mudar o curso, resetamos o módulo selecionado
+    setSelectedModuleId("");
+    setFormData((prev) => ({ ...prev, moduleId: "" }));
+  };
+
   const handleModuleSelect = (value) => {
+    setSelectedModuleId(value);
     setFormData((prev) => ({ ...prev, moduleId: value }));
     fetchModuleAndLessons(value);
   };
@@ -190,23 +334,49 @@ const AdminLessons = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-4 w-full">
           <h1 className="text-3xl font-bold tracking-tight" data-component-name="AdminLessons">
             Gerenciar Aulas {module ? `- ${module.title}` : ""}
           </h1>
-          <div className="w-64">
-            <Select value={moduleIdFromUrl} onValueChange={handleModuleSelect}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione o módulo" />
-              </SelectTrigger>
-              <SelectContent>
-                {allModules.map((mod) => (
-                  <SelectItem key={mod.id} value={mod.id}>
-                    {mod.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          
+          <div className="flex flex-wrap gap-4 w-full">
+            {/* Seletor de Cursos */}
+            <div className="w-full md:w-64">
+              <Label htmlFor="course-select" className="mb-2 block">Selecione o Curso</Label>
+              <Select value={selectedCourseId} onValueChange={handleCourseSelect}>
+                <SelectTrigger id="course-select">
+                  <SelectValue placeholder="Selecione o curso" />
+                </SelectTrigger>
+                <SelectContent>
+                  {courses.map((course) => (
+                    <SelectItem key={course.id} value={course.id}>
+                      {course.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {/* Seletor de Módulos */}
+            <div className="w-full md:w-64">
+              <Label htmlFor="module-select" className="mb-2 block">Selecione o Módulo</Label>
+              <Select 
+                value={selectedModuleId} 
+                onValueChange={handleModuleSelect}
+                disabled={!selectedCourseId || filteredModules.length === 0}
+              >
+                <SelectTrigger id="module-select">
+                  <SelectValue placeholder={filteredModules.length === 0 ? "Nenhum módulo disponível" : "Selecione o módulo"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredModules.map((mod) => (
+                    <SelectItem key={mod.id} value={mod.id}>
+                      {mod.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={(open) => {

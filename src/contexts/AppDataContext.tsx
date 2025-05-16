@@ -190,66 +190,67 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
-  // Inicializar dados e configurar inscrições em tempo real
+  // Inicializar dados com carregamento otimizado
   useEffect(() => {
-    // Carregar cursos e todos os módulos ao inicializar
-    refreshCourses();
-    loadAllModules();
+    // Carregar apenas os cursos inicialmente (sem módulos e aulas)
+    // Isso melhora significativamente o tempo de carregamento inicial
+    console.time('initialLoad');
+    
+    // Definir um timeout para mostrar feedback visual enquanto carrega
+    const loadingTimeout = setTimeout(() => {
+      console.log('Carregamento inicial está demorando mais que o esperado...');
+    }, 2000);
+    
+    refreshCourses()
+      .then(() => {
+        // Carregar módulos apenas quando necessário, não no carregamento inicial
+        clearTimeout(loadingTimeout);
+        console.timeEnd('initialLoad');
+        console.log('Carregamento inicial concluído com sucesso');
+      })
+      .catch(error => {
+        clearTimeout(loadingTimeout);
+        console.error('Erro no carregamento inicial:', error);
+      });
 
-    // Configurar inscrições em tempo real do Supabase
-    const coursesChannel = supabase
-      .channel('public:courses')
+    // Configurar inscrições em tempo real do Supabase de forma otimizada
+    // Usar um único canal para todas as tabelas reduz overhead
+    const dataChannel = supabase
+      .channel('public:data_changes')
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
         table: 'courses' 
       }, (payload) => {
-        console.log('Mudança detectada em cursos:', payload);
-        refreshCourses();
+        // Atualizar apenas quando estamos na área administrativa
+        // ou quando é uma mudança crítica (inserção/deleção)
+        if (payload.eventType === 'INSERT' || payload.eventType === 'DELETE') {
+          console.log('Mudança crítica detectada em cursos:', payload.eventType);
+          refreshCourses();
+        }
       })
-      .subscribe();
-
-    const modulesChannel = supabase
-      .channel('public:modules')
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
         table: 'modules' 
       }, (payload: any) => {
-        console.log('Mudança detectada em módulos:', payload);
+        // Atualizar apenas módulos do curso afetado, não todos os módulos
         const courseId = payload.new?.course_id || payload.old?.course_id;
         if (courseId) {
-          console.log(`Atualizando módulos para o curso ${courseId} após mudança detectada`);
-          refreshModules(courseId);
-          
-          // Também atualizar os cursos para refletir a mudança na contagem de módulos
-          refreshCourses();
-        }
-      })
-      .subscribe();
-
-    const lessonsChannel = supabase
-      .channel('public:lessons')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'lessons' 
-      }, (payload: any) => {
-        console.log('Mudança detectada em aulas:', payload);
-        const moduleId = payload.new?.module_id || payload.old?.module_id;
-        if (moduleId) {
-          refreshLessons(moduleId);
+          console.log(`Mudança detectada em módulos do curso ${courseId}`);
+          // Atualizamos o cache apenas se já tivermos carregado esses módulos antes
+          if (modules.some(m => m.courseId === courseId)) {
+            refreshModules(courseId);
+          }
         }
       })
       .subscribe();
 
     // Limpar inscrições ao desmontar
     return () => {
-      coursesChannel.unsubscribe();
-      modulesChannel.unsubscribe();
-      lessonsChannel.unsubscribe();
+      dataChannel.unsubscribe();
     };
-  }, [refreshCourses, refreshModules, refreshLessons]);
+  }, [refreshCourses, refreshModules]);
 
   const value = {
     courses,

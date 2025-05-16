@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import { courseService } from './courseService';
+import courseService from './courseService';
 import { moduleService } from './moduleService';
 import { lessonService } from './lessonService';
 import { lessonProgressService } from './lessonProgressService';

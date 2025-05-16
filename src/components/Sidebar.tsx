@@ -44,7 +44,7 @@ const Sidebar = () => {
     {
       title: "Certificados",
       icon: <Award size={20} />,
-      href: "/dashboard#certificates",
+      href: "/aluno/certificados",
     },
   ];
   

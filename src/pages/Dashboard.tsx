@@ -2,12 +2,15 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Link, useNavigate } from "react-router-dom";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Course, Certificate } from "@/types";
 import { courseService, certificateService } from "@/services/api";
-import { BookOpen, Award, GraduationCap, Loader2 } from "lucide-react";
+import { BookOpen, Award, GraduationCap, Loader2, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { BotaoForcarCertificado } from "@/components/BotaoForcarCertificado";
+import { toast } from "sonner";
+import { certificadoService } from "@/services/certificadoService";
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -36,30 +39,46 @@ const Dashboard = () => {
   };
   
   const handleNavigateToCertificates = () => {
-    navigate("/certificates");
+    navigate("/aluno/certificados");
   };
 
   useEffect(() => {
+    let isMounted = true;
     const fetchData = async () => {
       setIsLoading(true);
       try {
         if (user) {
+          console.time('dashboard-load');
+          
+          // Carregar dados em paralelo para melhorar a performance
           const [enrolledCoursesData, certificatesData] = await Promise.all([
             courseService.getEnrolledCourses(user.id),
             certificateService.getCertificates(user.id)
           ]);
-          setEnrolledCourses(enrolledCoursesData);
-          setCertificates(certificatesData);
+          
+          // Verificar se o componente ainda está montado antes de atualizar o estado
+          if (isMounted) {
+            setEnrolledCourses(enrolledCoursesData);
+            setCertificates(certificatesData);
+            console.timeEnd('dashboard-load');
+          }
         }
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
-        // Considerar adicionar um toast de erro para o usuário aqui
+        // Não mostrar toast de erro para não interromper a experiência do usuário
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     fetchData();
+    
+    // Cleanup function para evitar memory leaks
+    return () => {
+      isMounted = false;
+    };
   }, [user]);
 
   if (isLoading) {
@@ -172,6 +191,42 @@ const Dashboard = () => {
                     <div className="progress-bar">
                       <div className="progress-value" style={{ width: `${course.progress}%` }}></div>
                     </div>
+                    
+                    {course.progress >= 90 && (
+                      <div className="mt-3 flex items-center justify-between">
+                        <div className="flex items-center gap-1 text-amber-600">
+                          <AlertTriangle className="h-4 w-4" />
+                          <span className="text-xs">Quase concluído!</span>
+                        </div>
+                        
+                        {course.progress === 100 && (
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            className="text-xs h-7 px-2"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (user?.id) {
+                                certificadoService.forcarGeracaoCertificado(user.id, course.id)
+                                  .then(certificadoId => {
+                                    if (certificadoId) {
+                                      toast.success("Certificado gerado com sucesso!");
+                                      navigate(`/aluno/certificado/${certificadoId}`);
+                                    }
+                                  })
+                                  .catch(error => {
+                                    console.error("Erro ao gerar certificado:", error);
+                                    toast.error("Erro ao gerar certificado");
+                                  });
+                              }
+                            }}
+                          >
+                            <Award className="h-3 w-3 mr-1" /> Gerar Certificado
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </Link>
@@ -187,7 +242,52 @@ const Dashboard = () => {
         {certificates.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-8">
-              <p className="text-muted-foreground">Complete cursos para obter certificados.</p>
+              <p className="text-muted-foreground mb-4">Complete cursos para obter certificados.</p>
+              
+              {enrolledCourses.some(course => course.progress === 100) && (
+                <div className="flex flex-col items-center space-y-3 p-3 bg-amber-50 rounded-md border border-amber-200 max-w-md">
+                  <div className="flex items-center gap-2 text-amber-700">
+                    <AlertTriangle className="h-5 w-5" />
+                    <p className="text-sm font-medium">Cursos concluídos sem certificado</p>
+                  </div>
+                  <p className="text-xs text-amber-600 text-center">
+                    Você possui cursos com 100% de progresso, mas sem certificados gerados.
+                    Clique no botão abaixo para forçar a geração de certificados para todos os cursos concluídos.
+                  </p>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="bg-amber-600 hover:bg-amber-700"
+                    onClick={async () => {
+                      if (!user?.id) return;
+                      
+                      const completedCourses = enrolledCourses.filter(course => course.progress === 100);
+                      if (completedCourses.length === 0) return;
+                      
+                      let successCount = 0;
+                      
+                      for (const course of completedCourses) {
+                        try {
+                          const certificadoId = await certificadoService.forcarGeracaoCertificado(user.id, course.id);
+                          if (certificadoId) successCount++;
+                        } catch (error) {
+                          console.error(`Erro ao gerar certificado para curso ${course.id}:`, error);
+                        }
+                      }
+                      
+                      if (successCount > 0) {
+                        toast.success(`${successCount} certificado(s) gerado(s) com sucesso!`);
+                        // Recarregar a página para mostrar os novos certificados
+                        window.location.reload();
+                      } else {
+                        toast.error("Não foi possível gerar certificados. Tente novamente mais tarde.");
+                      }
+                    }}
+                  >
+                    <Award className="h-4 w-4 mr-2" /> Gerar Todos os Certificados
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         ) : (
@@ -205,7 +305,7 @@ const Dashboard = () => {
                     <p className="text-sm text-muted-foreground">Data de emissão:</p>
                     <p>{new Date(certificate.issueDate).toLocaleDateString()}</p>
                   </div>
-                  <Link to={`/certificates/${certificate.id}`}>
+                  <Link to={`/aluno/certificado/${certificate.id}`}>
                     <Button variant="outline" className="w-full">Ver Certificado</Button>
                   </Link>
                 </CardContent>

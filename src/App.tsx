@@ -7,7 +7,6 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { AppDataProvider } from "./contexts/AppDataContext";
-import { CertificateProvider } from "./contexts/CertificateContext";
 import { useEffect } from "react";
 import { queryClient } from "./utils/queryClient";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -29,9 +28,9 @@ import AdminModules from "./pages/admin/AdminModules";
 import AdminLessons from "./pages/admin/AdminLessons";
 import AdminUsers from "./pages/admin/AdminUsers";
 import AdminCertificates from "./pages/admin/AdminCertificates";
-import AdminCertificatesTest from "./pages/admin/AdminCertificatesTest";
 import AdminProfiles from "./pages/admin/AdminProfiles";
 import AdminMakeUserAdmin from "./pages/admin/AdminMakeUserAdmin";
+import GerenciadorCertificados from "./pages/admin/GerenciadorCertificados";
 import NotFound from "./pages/NotFound";
 
 // Usando o queryClient global definido em utils/queryClient.ts
@@ -62,8 +61,7 @@ const App = () => (
     <ThemeProvider>
       <AuthProvider>
         <AppDataProvider>
-          <CertificateProvider>
-            <TooltipProvider>
+          <TooltipProvider>
             <Toaster />
             <Sonner />
             {/* Use a simple div instead of NetworkErrorBoundary for diagnostic purposes */}
@@ -84,6 +82,7 @@ const App = () => (
                 <Route path="/aluno/curso/:id/player" element={<CoursePlayer />} />
                 <Route path="/aluno/certificados" element={<MeusCertificados />} />
                 <Route path="/certificates/:certificateId" element={<Certificate />} />
+                <Route path="/aluno/certificado/:certificateId" element={<Certificate />} />
               </Route>
               
               {/* Admin routes */}
@@ -96,8 +95,8 @@ const App = () => (
                 <Route path="/admin/users" element={<AdminUsers />} />
                 <Route path="/admin/make-admin" element={<AdminMakeUserAdmin />} />
                 <Route path="/admin/certificates" element={<AdminCertificates />} />
-                <Route path="/admin/certificates-test" element={<AdminCertificatesTest />} />
                 <Route path="/admin/profiles" element={<AdminProfiles />} />
+                <Route path="/admin/gerenciador-certificados" element={<GerenciadorCertificados />} />
               </Route>
               
               {/* 404 page */}
@@ -105,8 +104,7 @@ const App = () => (
               </Routes>
               </BrowserRouter>
             </div>
-            </TooltipProvider>
-          </CertificateProvider>
+          </TooltipProvider>
         </AppDataProvider>
       </AuthProvider>
     </ThemeProvider>

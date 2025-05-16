@@ -115,7 +115,7 @@ const Certificates = () => {
   };
 
   const viewCertificate = (certificateId: string) => {
-    navigate(`/certificates/${certificateId}`);
+    navigate(`/aluno/certificado/${certificateId}`);
   };
 
   return (

@@ -51,9 +51,11 @@ export interface Certificate {
   courseId: string;
   courseName: string;
   userName: string;
+  courseHours?: number; // Carga horária do curso em horas
   issueDate: string;
   expiryDate?: string;
   certificateUrl?: string;
+  certificateHtml?: string; // HTML do certificado renderizado
 }
 
 export interface Profile {

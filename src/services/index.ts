@@ -1,7 +1,7 @@
-// Exportau00e7u00e3o centralizada de todos os serviu00e7os
+// Exportação centralizada de todos os serviços
 
-// Serviu00e7os principais
-export { courseService } from './courseService';
+// Serviços principais
+export { default as courseService } from './courseService';
 export { moduleService } from './moduleService';
 export { lessonService } from './lessonService';
 export { lessonProgressService } from './lessonProgressService';
@@ -9,11 +9,11 @@ export { certificateService } from './certificateService';
 export { profileService } from './profileService';
 export { userService } from './userService';
 
-// Serviu00e7os de integrau00e7u00e3o
+// Serviços de integração
 export { integrationService } from './integrationService';
 export { databaseRelationsService } from './databaseRelationsService';
 
-// Serviu00e7os de cursos
+// Serviços de cursos
 export * from './courses/courseQueries';
 export * from './courses/courseAdminService';
 export * from './courses/enrollmentService';

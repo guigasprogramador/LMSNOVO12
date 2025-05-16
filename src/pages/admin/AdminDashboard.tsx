@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { courseService } from "@/services/api";
-import { BookOpen } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { BookOpen, Award, Users, FileText, Layers } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 
 const AdminDashboard = () => {
   const { user } = useAuth();
@@ -12,11 +14,21 @@ const AdminDashboard = () => {
     totalCourses: 0,
     totalModules: 0,
     totalLessons: 0,
+    totalUsers: 0,
+    totalCertificates: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
   
   const handleNavigateToCourses = () => {
     navigate("/admin/courses");
+  };
+  
+  const handleNavigateToUsers = () => {
+    navigate("/admin/users");
+  };
+  
+  const handleNavigateToCertificados = () => {
+    navigate("/admin/gerenciador-certificados");
   };
 
   useEffect(() => {
@@ -37,10 +49,22 @@ const AdminDashboard = () => {
               )
             );
           }, 0);
+          
+          // Obter estatísticas de usuários e certificados do Supabase
+          const { data: usersData } = await supabase
+            .from('profiles')
+            .select('id', { count: 'exact' });
+            
+          const { data: certificatesData } = await supabase
+            .from('certificates')
+            .select('id', { count: 'exact' });
+          
           setStats({
             totalCourses: courses.length,
             totalModules,
             totalLessons,
+            totalUsers: usersData?.length || 0,
+            totalCertificates: certificatesData?.length || 0,
           });
         }
       } catch (error) {
@@ -87,7 +111,87 @@ const AdminDashboard = () => {
             </p>
           </CardContent>
         </Card>
+        
+        <Card 
+          className="cursor-pointer hover:shadow-md transition-shadow duration-200" 
+          onClick={handleNavigateToUsers}
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Usuários</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.totalUsers}</div>
+            <p className="text-xs text-muted-foreground">
+              Alunos matriculados na plataforma
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card 
+          className="cursor-pointer hover:shadow-md transition-shadow duration-200" 
+          onClick={handleNavigateToCertificados}
+        >
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Certificados</CardTitle>
+            <Award className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.totalCertificates}</div>
+            <p className="text-xs text-muted-foreground">
+              Certificados emitidos
+            </p>
+          </CardContent>
+        </Card>
       </div>
+      
+      <Card>
+        <CardHeader>
+          <CardTitle>Ferramentas Administrativas</CardTitle>
+          <CardDescription>
+            Acesse as principais ferramentas para gerenciar a plataforma
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <Button 
+              variant="outline" 
+              className="h-24 flex flex-col items-center justify-center gap-2"
+              onClick={() => navigate("/admin/courses")}
+            >
+              <Layers className="h-6 w-6" />
+              <span>Gerenciar Cursos</span>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="h-24 flex flex-col items-center justify-center gap-2"
+              onClick={() => navigate("/admin/users")}
+            >
+              <Users className="h-6 w-6" />
+              <span>Gerenciar Usuários</span>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="h-24 flex flex-col items-center justify-center gap-2 bg-amber-50 hover:bg-amber-100 border-amber-200"
+              onClick={() => navigate("/admin/gerenciador-certificados")}
+            >
+              <Award className="h-6 w-6 text-amber-600" />
+              <span className="text-amber-800">Gerenciador de Certificados</span>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              className="h-24 flex flex-col items-center justify-center gap-2"
+              onClick={() => navigate("/admin/certificates")}
+            >
+              <FileText className="h-6 w-6" />
+              <span>Certificados Antigos</span>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

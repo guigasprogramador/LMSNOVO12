@@ -11,6 +11,7 @@ import { Award, Download, Eye, Search, Share2, QrCode } from "lucide-react";
 import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const MeusCertificados = () => {
   const { user } = useAuth();
@@ -128,7 +129,7 @@ const MeusCertificados = () => {
   };
 
   const viewCertificate = (certificateId: string) => {
-    navigate(`/certificates/${certificateId}`);
+    navigate(`/aluno/certificado/${certificateId}`);
   };
 
   const handleShare = async (cert: Certificate) => {

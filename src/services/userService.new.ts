@@ -23,116 +23,77 @@ export const userService = {
       console.log('Buscando usuários...');
       
       // Abordagem 1: Buscar todos os perfis da tabela profiles
-      console.log('Abordagem 1: Buscando usuários da tabela profiles...');
-      try {
-        const { data: profiles, error: profilesError } = await supabase
-          .from('profiles')
-          .select('id, name, email, role, created_at, avatar_url');
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, name, email, role, created_at');
+      
+      if (profilesError) {
+        console.error('Erro ao buscar perfis:', profilesError);
+      } else if (profiles && profiles.length > 0) {
+        console.log(`Encontrados ${profiles.length} perfis`);
         
-        if (profilesError) {
-          console.error('Erro na Abordagem 1:', profilesError);
-        } else if (profiles && profiles.length > 0) {
-          console.log(`Sucesso na Abordagem 1! Encontrados ${profiles.length} perfis`);
-          
-          // Converter perfis para o tipo User
-          return profiles.map(profile => ({
-            id: profile.id,
-            name: profile.name || 'Usuário',
-            email: profile.email || '',
-            role: profile.role || 'student',
-            avatarUrl: profile.avatar_url || '',
-            createdAt: profile.created_at || new Date().toISOString()
-          }));
-        } else {
-          console.log('Abordagem 1: Nenhum perfil encontrado');
-        }
-      } catch (approach1Error) {
-        console.error('Erro na Abordagem 1 (capturado):', approach1Error);
+        // Converter perfis para o tipo User
+        return profiles.map(profile => ({
+          id: profile.id,
+          name: profile.name || 'Usuário',
+          email: profile.email || '',
+          role: profile.role || 'student',
+          avatarUrl: '',
+          createdAt: profile.created_at || new Date().toISOString()
+        }));
+      } else {
+        console.log('Nenhum perfil encontrado, tentando abordagem alternativa');
       }
       
-      // Abordagem 2: Buscar todos os perfis com uma consulta mais simples
-      console.log('Abordagem 2: Tentando consulta mais simples...');
+      // Abordagem 2: Buscar usuários diretamente da autenticação
       try {
-        const { data: simpleProfiles, error: simpleError } = await supabase
-          .from('profiles')
-          .select('*');
+        console.log('Tentando buscar usuários da autenticação');
+        const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
         
-        if (simpleError) {
-          console.error('Erro na Abordagem 2:', simpleError);
-        } else if (simpleProfiles && simpleProfiles.length > 0) {
-          console.log(`Sucesso na Abordagem 2! Encontrados ${simpleProfiles.length} perfis`);
+        if (authError) {
+          console.error('Erro ao buscar usuários da autenticação:', authError);
+        } else if (authUsers?.users && authUsers.users.length > 0) {
+          console.log(`Encontrados ${authUsers.users.length} usuários na autenticação`);
           
-          return simpleProfiles.map(profile => ({
-            id: profile.id,
-            name: profile.name || 'Usuário',
-            email: profile.email || '',
-            role: profile.role || 'student',
-            avatarUrl: profile.avatar_url || '',
-            createdAt: profile.created_at || new Date().toISOString()
+          // Converter usuários da autenticação para o tipo User
+          return authUsers.users.map(user => ({
+            id: user.id,
+            name: user.user_metadata?.name || user.user_metadata?.full_name || 'Usuário',
+            email: user.email || '',
+            role: user.user_metadata?.role || 'student',
+            avatarUrl: '',
+            createdAt: user.created_at || new Date().toISOString()
           }));
-        } else {
-          console.log('Abordagem 2: Nenhum perfil encontrado');
         }
-      } catch (approach2Error) {
-        console.error('Erro na Abordagem 2 (capturado):', approach2Error);
+      } catch (authError) {
+        console.error('Erro ao buscar usuários da autenticação:', authError);
       }
       
       // Abordagem 3: Último recurso - buscar apenas o usuário atual
-      console.log('Abordagem 3: Buscando apenas o usuário atual...');
       try {
+        console.log('Tentando buscar apenas o usuário atual');
         const { data: authData } = await supabase.auth.getUser();
         
         if (authData?.user) {
-          console.log('Sucesso na Abordagem 3! Retornando apenas o usuário atual');
-          
-          // Buscar o perfil do usuário atual para ter informações completas
-          const { data: currentProfile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', authData.user.id)
-            .maybeSingle();
-          
-          // Se não encontrar o perfil, criar automaticamente
-          if (!currentProfile) {
-            console.log('Perfil do usuário atual não encontrado, criando automaticamente...');
-            
-            const { data: newProfile, error: createError } = await supabase
-              .from('profiles')
-              .upsert({
-                id: authData.user.id,
-                name: authData.user.user_metadata?.name || authData.user.user_metadata?.full_name || 'Usuário',
-                email: authData.user.email,
-                role: authData.user.user_metadata?.role || 'student',
-                created_at: new Date().toISOString()
-              })
-              .select()
-              .single();
-            
-            if (createError) {
-              console.error('Erro ao criar perfil automaticamente:', createError);
-            } else if (newProfile) {
-              console.log('Perfil criado automaticamente:', newProfile);
-            }
-          }
-          
+          console.log('Retornando apenas o usuário atual');
           return [{
             id: authData.user.id,
-            name: currentProfile?.name || authData.user.user_metadata?.name || authData.user.user_metadata?.full_name || 'Usuário',
-            email: currentProfile?.email || authData.user.email || '',
-            role: currentProfile?.role || authData.user.user_metadata?.role || 'student',
-            avatarUrl: currentProfile?.avatar_url || '',
-            createdAt: currentProfile?.created_at || authData.user.created_at || new Date().toISOString()
+            name: authData.user.user_metadata?.name || authData.user.user_metadata?.full_name || 'Usuário',
+            email: authData.user.email || '',
+            role: authData.user.user_metadata?.role || 'student',
+            avatarUrl: '',
+            createdAt: authData.user.created_at || new Date().toISOString()
           }];
         }
       } catch (userError) {
-        console.error('Erro na Abordagem 3:', userError);
+        console.error('Erro ao buscar usuário atual:', userError);
       }
       
       // Se todas as tentativas falharem, retornar array vazio
-      console.log('Todas as abordagens falharam, retornando array vazio');
+      console.log('Nenhum método funcionou para buscar usuários, retornando array vazio');
       return [];
     } catch (error) {
-      console.error('Erro geral ao buscar usuários:', error);
+      console.error('Erro ao buscar usuários:', error);
       // Retornar array vazio em vez de lançar erro para evitar quebrar a interface
       return [];
     }
@@ -222,45 +183,22 @@ export const userService = {
       }
       
       // Se chegou aqui, o usuário foi criado na autenticação
-      // Agora criar ou atualizar o perfil do usuário - IMPORTANTE para que o usuário apareça na lista
+      // Agora criar ou atualizar o perfil do usuário
       try {
-        console.log('Criando perfil do usuário na tabela profiles...');
-        
-        // Tentar várias vezes criar o perfil para garantir que seja criado
-        let profileCreated = false;
-        let attempts = 0;
-        
-        while (!profileCreated && attempts < 3) {
-          attempts++;
-          console.log(`Tentativa ${attempts} de criar perfil para ${userData.name}`);
-          
-          const { data: profileData, error: profileError } = await supabase
-            .from('profiles')
-            .upsert({
-              id: userId,
-              name: userData.name,
-              email: userData.email,
-              role: userData.role,
-              created_at: new Date().toISOString()
-            })
-            .select()
-            .single();
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: userId,
+            name: userData.name,
+            email: userData.email,
+            role: userData.role,
+            created_at: new Date().toISOString()
+          });
 
-          if (profileError) {
-            console.error(`Erro na tentativa ${attempts} de criar perfil:`, profileError);
-            // Esperar um pouco antes da próxima tentativa
-            if (attempts < 3) {
-              await new Promise(resolve => setTimeout(resolve, 500 * attempts));
-            }
-          } else if (profileData) {
-            console.log('Perfil criado com sucesso:', profileData);
-            profileCreated = true;
-          }
-        }
-        
-        if (!profileCreated) {
-          console.warn('Não foi possível criar o perfil após várias tentativas');
-          // Mesmo sem perfil, o usuário foi criado na autenticação
+        if (profileError) {
+          console.error('Erro ao criar perfil do usuário:', profileError);
+          // Não lançar erro aqui, já temos o usuário na autenticação
+          // O perfil será criado automaticamente quando o usuário fizer login
         }
       } catch (profileError) {
         console.error('Erro capturado ao criar perfil:', profileError);

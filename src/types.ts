@@ -4,9 +4,11 @@ export interface Certificate {
   courseId: string;
   courseName: string;
   userName: string;
+  courseHours?: number;
   issueDate: string;
   expiryDate?: string;
   certificateUrl?: string;
+  certificateHtml?: string;
 }
 
 export interface Course {
@@ -101,6 +103,21 @@ export interface RecentCertificate {
   issueDate: string;
   courseName: string;
   userName: string;
+}
+
+// Interfaces para dados da administração
+export interface CourseForAdmin {
+  id: string;
+  title: string;
+  description?: string;
+  thumbnail?: string;
+  duration?: string;
+  instructor: string;
+  rating: number;
+  createdAt: string;
+  updatedAt: string;
+  enrolledCount: number; // Contagem de matrículas
+  modulesCount: number; // Contagem de módulos
 }
 
 // Create data interfaces

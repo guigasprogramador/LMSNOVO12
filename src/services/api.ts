@@ -8,6 +8,7 @@ export { lessonService } from './lessonService';
 export { certificateService } from './certificateService';
 export { userService } from './userService';
 export { profileService } from './profileService';
+export { autoEnrollmentService } from './autoEnrollmentService';
 
 export const courseService = {
   ...courseQueries,

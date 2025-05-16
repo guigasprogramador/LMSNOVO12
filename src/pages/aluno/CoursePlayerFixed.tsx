@@ -291,18 +291,11 @@ const CoursePlayer = () => {
   };
 
   // Função para marcar aula como concluída
-  const handleMarkAsCompleted = async () => {
-    if (!selectedLesson || !id || !userId) return;
-
-    try {
-      // Marcar a aula como concluída no banco de dados
-      console.log(`Marcando aula ${selectedLesson.id} como concluída para usuário ${userId}`);
-      await lessonProgressService.markLessonAsCompleted(userId, selectedLesson.id);
       
-      // Atualizar o estado local
-      const updatedModules = modules.map(module => {
-        if (module.id === selectedModule?.id) {
-          return {
+      // Verificar se o curso foi concluído
+      if (calculatedProgress === 100) {
+        console.log('Curso 100% concluído, iniciando verificação de certificado...');
+        setCourseCompletedRecently(true);
             ...module,
             lessons: module.lessons?.map(lesson => 
               lesson.id === selectedLesson.id 

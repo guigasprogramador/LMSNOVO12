@@ -1,36 +1,98 @@
-import { Course, Module, Lesson } from '@/types';
+import { Course, Module, Lesson, CourseForAdmin } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { requestQueue } from '@/utils/requestQueue';
 
-export const courseService = {
+// Interface para o tipo retornado pelo Supabase na busca aninhada para getCourseById
+interface CourseWithRelationsDB {
+  id: string;
+  title: string;
+  description: string | null;
+  thumbnail: string | null;
+  duration: string | null;
+  instructor: string;
+  rating: number | null;
+  created_at: string;
+  updated_at: string;
+  enrollments: { id: string }[] | null; // Relação para contagem de matrículas
+  modules: { // Relação aninhada para módulos e aulas
+    id: string;
+    title: string;
+    description: string | null;
+    order_number: number;
+    lessons: { // Relação aninhada para aulas
+      id: string;
+      title: string | null;
+      description: string | null;
+      duration: string | null;
+      video_url: string | null;
+      content: string | null;
+      order_number: number | null;
+    }[] | null;
+  }[] | null;
+}
+
+// Interface para o tipo retornado pelo Supabase na busca para getCoursesForAdmin
+interface CourseForAdminDB {
+  id: string;
+  title: string;
+  description: string | null;
+  thumbnail: string | null;
+  duration: string | null;
+  instructor: string;
+  rating: number | null;
+  created_at: string;
+  updated_at: string;
+  enrollments: { id: string }[] | null; // Relação para contagem de matrículas
+  modules: { id: string }[] | null; // Relação para contagem de módulos
+}
+
+const courseService = {
   async getCourses(): Promise<Course[]> {
     try {
+      // Buscar cursos com contagem de módulos e matrículas
       const { data, error } = await supabase
         .from('courses')
-        .select('id, title, description, thumbnail, duration, instructor, enrolledcount, rating, created_at, updated_at')
+        .select(
+          'id, title, description, thumbnail, duration, instructor, rating, created_at, updated_at,'
+          + 'modules(id, title),' // Seleciona apenas o ID e título dos módulos
+          + 'enrollments(id)' // Seleciona apenas o ID das matrículas para contagem
+        )
         .order('title', { ascending: true });
 
       if (error) throw error;
-      if (!data) return [];
-
-      return data.map(course => ({
+      
+      // Verificar se os dados são válidos antes de fazer o cast
+      if (!data || !Array.isArray(data)) return [];
+      
+      // Usar tipagem segura para os dados
+      const safeData = data as any[];
+      
+      return safeData.map(course => ({
         id: course.id,
         title: course.title,
         description: course.description || '',
         thumbnail: course.thumbnail || '/placeholder.svg',
         duration: course.duration || '',
         instructor: course.instructor,
-        enrolledCount: course.enrolledcount || 0,
         rating: course.rating || 0,
-        modules: [],
+        // Mapear módulos e contar
+        modules: course.modules ? course.modules.map((mod: { id: string, title: string }) => ({
+          id: mod.id,
+          courseId: course.id, // Adicionar courseId ao módulo (mesmo que não usado na UI, mantém consistência com o tipo Module)
+          title: mod.title,
+          order: 0, // Ordem não é relevante aqui, definir como 0
+          lessons: [] // Aulas não são necessárias nesta visualização
+        })) : [],
+        // Contar matrículas (se enrollments for null, a contagem é 0)
+        enrolledCount: course.enrollments ? course.enrollments.length : 0,
         createdAt: course.created_at,
         updatedAt: course.updated_at,
-        isEnrolled: false,
-        progress: 0
+        isEnrolled: false, // Este campo é para o aluno, não para a admin view
+        progress: 0 // Progresso não é relevante aqui
       }));
     } catch (error) {
       console.error('Erro ao buscar cursos:', error);
-      throw new Error('Falha ao buscar cursos');
+      throw new Error('Falha ao buscar cursos para administração');
     }
   },
 
@@ -153,80 +215,87 @@ export const courseService = {
     if (!courseId) throw new Error('ID do curso é obrigatório');
 
     try {
-      // Usar a fila de requisições para evitar problemas de rate limit
-
-      // Primeiro, buscar o curso
-      const courseDataPromise = requestQueue.enqueue(() => 
-        supabase
+      // Buscar o curso básico primeiro
+      const { data: courseData, error: courseError } = await requestQueue.enqueue(async () => {
+        const response = await supabase
           .from('courses')
           .select('*')
           .eq('id', courseId)
-          .single()
-      );
-      
-      const { data: courseData, error: courseError } = await courseDataPromise;
-      
-      if (courseError) throw courseError;
-      if (!courseData) throw new Error('Curso não encontrado');
-      
-      // Depois, buscar os módulos relacionados ao curso
-      const modulesDataPromise = requestQueue.enqueue(() => 
-        supabase
-          .from('modules')
-          .select('*')
-          .eq('course_id', courseId)
-          .order('order_number', { ascending: true })
-      );
-      
-      const { data: modulesData, error: modulesError } = await modulesDataPromise;
-      
-      if (modulesError) throw modulesError;
-      
-      // Para cada módulo, buscar suas aulas de forma controlada
-      const modulesWithLessonsPromises = (modulesData || []).map(async (module) => {
-        // Usar a fila para cada requisição de aulas
-        const lessonsDataPromise = requestQueue.enqueue(() => 
-          supabase
-            .from('lessons')
-            .select('*')
-            .eq('module_id', module.id)
-            .order('order_number', { ascending: true })
-        );
-        
-        const { data: lessonsData, error: lessonsError } = await lessonsDataPromise;
-        
-        if (lessonsError) throw lessonsError;
-        
-        return {
-          ...module,
-          lessons: lessonsData || []
-        };
+          .single();
+        return response;
       });
       
-      // Aguardar todas as requisições de aulas serem concluídas
-      const modulesWithLessons = await Promise.all(modulesWithLessonsPromises);
-
-      // Mapear os módulos e aulas para o formato esperado pela aplicação
-      const formattedModules = modulesWithLessons.map((module: any) => ({
-        id: module.id,
-        courseId: module.course_id,
-        title: module.title,
-        description: module.description || '',
-        order: module.order_number,
-        lessons: (module.lessons || []).map((lesson: any) => ({
-          id: lesson.id,
-          moduleId: lesson.module_id,
-          title: lesson.title,
-          description: lesson.description || '',
-          duration: lesson.duration || '',
-          videoUrl: lesson.video_url || '',
-          content: lesson.content || '',
-          order: lesson.order_number,
-          isCompleted: false
-        }))
-      }));
+      if (courseError) {
+        console.error('Erro ao buscar dados básicos do curso:', courseError);
+        if (courseError.code === 'PGRST116') {
+          console.log('Curso não encontrado para ID:', courseId);
+          return null;
+        }
+        throw courseError;
+      }
       
-      // Retornar o curso com seus mu00f3dulos e aulas
+      if (!courseData) {
+        console.log('Curso não encontrado para ID:', courseId);
+        return null;
+      }
+      
+      // Buscar matrículas separadamente
+      const { data: enrollmentsData } = await supabase
+        .from('enrollments')
+        .select('id')
+        .eq('course_id', courseId);
+        
+      // Buscar módulos separadamente
+      const { data: modulesData, error: modulesError } = await supabase
+        .from('modules')
+        .select('id, title, description, order_number')
+        .eq('course_id', courseId)
+        .order('order_number', { ascending: true });
+        
+      if (modulesError) {
+        console.error('Erro ao buscar módulos do curso:', modulesError);
+        throw modulesError;
+      }
+      
+      // Formatar os dados do curso
+      const formattedModules: Module[] = [];
+      
+      // Buscar aulas para cada módulo
+      if (modulesData && modulesData.length > 0) {
+        for (const module of modulesData) {
+          const { data: lessonsData, error: lessonsError } = await supabase
+            .from('lessons')
+            .select('id, title, description, duration, video_url, content, order_number')
+            .eq('module_id', module.id)
+            .order('order_number', { ascending: true });
+            
+          if (lessonsError) {
+            console.error(`Erro ao buscar aulas do módulo ${module.id}:`, lessonsError);
+            continue; // Continuar com o próximo módulo mesmo se houver erro
+          }
+          
+          formattedModules.push({
+            id: module.id,
+            courseId: courseId,
+            title: module.title,
+            description: module.description || '',
+            order: module.order_number,
+            lessons: (lessonsData || []).map(lesson => ({
+              id: lesson.id,
+              moduleId: module.id,
+              title: lesson.title || '',
+              description: lesson.description || '',
+              duration: lesson.duration || '',
+              videoUrl: lesson.video_url || '',
+              content: lesson.content || '',
+              order: lesson.order_number || 0,
+              isCompleted: false
+            }))
+          });
+        }
+      }
+      
+      // Construir o objeto do curso
       return {
         id: courseData.id,
         title: courseData.title,
@@ -234,35 +303,60 @@ export const courseService = {
         thumbnail: courseData.thumbnail || '/placeholder.svg',
         duration: courseData.duration || '',
         instructor: courseData.instructor,
-        enrolledCount: courseData.enrolledcount || 0,
+        enrolledCount: enrollmentsData ? enrollmentsData.length : 0,
         rating: courseData.rating || 0,
         modules: formattedModules,
         createdAt: courseData.created_at,
         updatedAt: courseData.updated_at,
-        isEnrolled: false,
-        progress: 0
+        isEnrolled: false, // Será atualizado pelo contexto do usuário
+        progress: 0 // Será atualizado pelo contexto do usuário
       };
+
+
     } catch (error) {
-      console.error('Erro ao buscar curso:', error);
-      
-      // Tratamento de erros mais detalhado
-      if (error instanceof Error) {
-        // Se for um erro de relacionamento entre tabelas, fornecer uma mensagem mais clara
-        if (error.message.includes('relationship between') && error.message.includes('courses') && error.message.includes('modules')) {
-          throw new Error('Erro no banco de dados: Relacionamento entre cursos e mu00f3dulos nu00e3o encontrado. Verifique a estrutura do banco de dados.');
-        }
-        
-        // Se for um erro de rede, fornecer uma mensagem mais clara
-        if (error.message.includes('network') || error.message.includes('Network')) {
-          throw new Error('Erro de conexu00e3o: Verifique sua conexu00e3o com a internet e tente novamente.');
-        }
-        
-        // Passar a mensagem original se for um erro conhecido
-        throw new Error(`Erro ao buscar curso: ${error.message}`);
+      console.error('Erro geral ao buscar curso por ID:', error);
+      throw new Error('Falha ao buscar detalhes do curso');
+    }
+  },
+
+  // Função para buscar todos os cursos para a área administrativa
+  async getCoursesForAdmin(): Promise<CourseForAdmin[]> {
+    try {
+      const { data, error } = await requestQueue.enqueue(async () => {
+        const response = await supabase
+          .from('courses')
+          .select('*, enrollments(id), modules(id)') // Incluir apenas IDs de matrículas e módulos para contagem
+          .order('created_at', { ascending: false });
+        return response;
+      });
+
+      if (error) {
+        console.error('Erro ao buscar cursos para admin:', error);
+        throw error; // Propagar o error
       }
-      
-      // Erro genu00e9rico
-      throw new Error('Falha ao buscar curso. Tente novamente mais tarde.');
+
+      // Mapear os dados para o formato esperado (CourseForAdmin)
+      const formattedCourses: CourseForAdmin[] = (data || []).map((course) => ({
+        id: course.id,
+        title: course.title,
+        description: course.description || '',
+        thumbnail: course.thumbnail || '/placeholder.svg',
+        duration: course.duration || '',
+        instructor: course.instructor,
+        rating: course.rating || 0,
+        createdAt: course.created_at,
+        updatedAt: course.updated_at,
+        // Contar matrículas e módulos a partir dos relacionamentos aninhados
+        enrolledCount: course.enrollments ? course.enrollments.length : 0,
+        modulesCount: course.modules ? course.modules.length : 0,
+      }));
+
+      return formattedCourses;
+    } catch (error) {
+      console.error('Erro geral ao buscar cursos para admin:', error);
+      throw new Error('Falha ao buscar cursos para a administração');
     }
   }
 };
+
+export default courseService;
