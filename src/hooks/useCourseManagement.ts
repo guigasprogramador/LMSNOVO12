@@ -91,7 +91,15 @@ export function useCourseManagement() {
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    
+    // Tratamento especial para o campo de duração
+    if (name === 'duration') {
+      // Garantir que seja um número válido
+      const numericValue = value === '' ? '' : String(parseInt(value) || 0);
+      setFormData((prev) => ({ ...prev, [name]: numericValue }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

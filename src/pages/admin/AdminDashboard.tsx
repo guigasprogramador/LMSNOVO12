@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { useAuth } from "@/contexts/AuthContext";
 import { courseService } from "@/services/api";
+import { moduleService } from "@/services/moduleService";
+import { lessonService } from "@/services/lessonService";
 import { supabase } from "@/integrations/supabase/client";
 import { BookOpen, Award, Users, FileText, Layers } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -35,29 +37,47 @@ const AdminDashboard = () => {
     const fetchData = async () => {
       try {
         if (user) {
+          // Buscar cursos
           const courses = await courseService.getCourses();
-          const totalModules = courses.reduce(
-            (total, course) => total + course.modules.length,
-            0
-          );
-          const totalLessons = courses.reduce((total, course) => {
-            return (
-              total +
-              course.modules.reduce(
-                (moduleTotal, module) => moduleTotal + module.lessons.length,
-                0
-              )
-            );
-          }, 0);
+          
+          // Buscar módulos diretamente do banco de dados
+          const { data: modulesData, error: modulesError } = await supabase
+            .from('modules')
+            .select('id, course_id');
+            
+          if (modulesError) {
+            console.error("Erro ao buscar módulos:", modulesError);
+          }
+          
+          // Buscar aulas diretamente do banco de dados
+          const { data: lessonsData, error: lessonsError } = await supabase
+            .from('lessons')
+            .select('id, module_id');
+            
+          if (lessonsError) {
+            console.error("Erro ao buscar aulas:", lessonsError);
+          }
+          
+          // Calcular totais
+          const totalModules = modulesData?.length || 0;
+          const totalLessons = lessonsData?.length || 0;
           
           // Obter estatísticas de usuários e certificados do Supabase
-          const { data: usersData } = await supabase
+          const { data: usersData, error: usersError } = await supabase
             .from('profiles')
             .select('id', { count: 'exact' });
             
-          const { data: certificatesData } = await supabase
+          if (usersError) {
+            console.error("Erro ao buscar usuários:", usersError);
+          }
+            
+          const { data: certificatesData, error: certificatesError } = await supabase
             .from('certificates')
             .select('id', { count: 'exact' });
+          
+          if (certificatesError) {
+            console.error("Erro ao buscar certificados:", certificatesError);
+          }
           
           setStats({
             totalCourses: courses.length,
@@ -65,6 +85,14 @@ const AdminDashboard = () => {
             totalLessons,
             totalUsers: usersData?.length || 0,
             totalCertificates: certificatesData?.length || 0,
+          });
+          
+          console.log("Estatísticas do dashboard:", {
+            cursos: courses.length,
+            modulos: totalModules,
+            aulas: totalLessons,
+            usuarios: usersData?.length || 0,
+            certificados: certificatesData?.length || 0,
           });
         }
       } catch (error) {

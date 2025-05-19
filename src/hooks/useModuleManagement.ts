@@ -15,7 +15,7 @@ export interface ModuleFormData {
 const defaultFormData: ModuleFormData = {
   title: '',
   description: '',
-  order: 0,
+  order: 1, // Começa com 1 como valor padrão
 };
 
 export function useModuleManagement(courseId: string) {
@@ -37,6 +37,26 @@ export function useModuleManagement(courseId: string) {
   
   // Obter módulos do curso atual
   const modules = getModulesByCourseId(courseId);
+  
+  // Efeito para sugerir a próxima ordem disponível quando o formulário é aberto
+  useEffect(() => {
+    if (isDialogOpen && !editingModuleId && courseId) {
+      // Encontrar a maior ordem existente e sugerir a próxima
+      if (modules.length > 0) {
+        const maxOrder = Math.max(...modules.map(m => m.order));
+        setFormData(prev => ({
+          ...prev,
+          order: maxOrder + 1
+        }));
+      } else {
+        // Se não houver módulos, começar com 1
+        setFormData(prev => ({
+          ...prev,
+          order: 1
+        }));
+      }
+    }
+  }, [isDialogOpen, editingModuleId, courseId, modules]);
 
   // Mutação para criar módulo
   const createModuleMutation = useMutation({
@@ -100,6 +120,22 @@ export function useModuleManagement(courseId: string) {
 
     if (!formData.title) {
       toast.error('Título é obrigatório');
+      return;
+    }
+    
+    if (!courseId) {
+      toast.error('Selecione um curso para adicionar o módulo');
+      return;
+    }
+    
+    // Verificar se já existe um módulo com a mesma ordem no curso
+    const existingModuleWithSameOrder = modules.find(
+      module => module.order === formData.order && 
+      (editingModuleId ? module.id !== editingModuleId : true)
+    );
+    
+    if (existingModuleWithSameOrder) {
+      toast.error(`Já existe um módulo com a ordem ${formData.order} neste curso: ${existingModuleWithSameOrder.title}`);
       return;
     }
 

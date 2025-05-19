@@ -76,7 +76,7 @@ const CoursesTable: React.FC<CoursesTableProps> = ({
                     <Badge variant="outline">{course.enrolledCount}</Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    <Badge variant="outline">{course.modules.length}</Badge>
+                    <Badge variant="outline">{course.moduleCount || course.modules.length || 0}</Badge>
                   </TableCell>
                   <TableCell>
                     <DropdownMenu>
@@ -137,7 +137,7 @@ const CoursesTable: React.FC<CoursesTableProps> = ({
                   </div>
                   <div className="flex items-center gap-1">
                     <span className="text-sm text-muted-foreground">Módulos:</span>
-                    <Badge variant="outline">{course.modules.length}</Badge>
+                    <Badge variant="outline">{course.moduleCount || course.modules.length || 0}</Badge>
                   </div>
                 </div>
               </div>

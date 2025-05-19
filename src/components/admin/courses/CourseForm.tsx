@@ -61,13 +61,21 @@ const CourseForm = ({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="duration">Duração</Label>
+              <Label htmlFor="duration">Duração (horas)</Label>
               <Input
                 id="duration"
                 name="duration"
+                type="number"
+                min="1"
                 value={formData.duration}
                 onChange={handleInputChange}
-                placeholder="Ex: 8 semanas"
+                placeholder="Ex: 40"
+                onKeyPress={(e) => {
+                  // Permitir apenas números
+                  if (!/[0-9]/.test(e.key)) {
+                    e.preventDefault();
+                  }
+                }}
               />
             </div>
           </div>

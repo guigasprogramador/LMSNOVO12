@@ -204,17 +204,26 @@ const AdminModules = () => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="order">Ordem</Label>
-                <Input
-                  id="order"
-                  name="order"
-                  type="number"
-                  min="1"
-                  value={formData.order}
-                  onChange={handleInputChange}
-                  placeholder="Ordem de exibição"
-                  required
-                  className="rounded-md"
-                />
+                <div className="flex flex-col space-y-1">
+                  <Input
+                    id="order"
+                    name="order"
+                    type="number"
+                    min="1"
+                    value={formData.order}
+                    onChange={handleInputChange}
+                    placeholder="Ordem de exibição"
+                    required
+                    className="rounded-md"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {modules.some(m => m.order === formData.order && (editingModuleId ? m.id !== editingModuleId : true)) ? (
+                      <span className="text-red-500">Já existe um módulo com esta ordem</span>
+                    ) : (
+                      "A ordem determina a sequência de exibição dos módulos"
+                    )}
+                  </p>
+                </div>
               </div>
               <DialogFooter>
                 <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg">

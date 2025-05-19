@@ -261,12 +261,16 @@ const AdminLessons = () => {
   const handleDeleteLesson = async (lessonId) => {
     if (confirm("Tem certeza de que deseja excluir esta aula?")) {
       try {
+        setIsLoading(true);
         await lessonService.deleteLesson(lessonId);
         toast.success("Aula excluída com sucesso");
         const modId = formData.moduleId || moduleIdFromUrl;
-        fetchModuleAndLessons(modId);
+        await fetchModuleAndLessons(modId);
       } catch (error) {
-        toast.error("Erro ao excluir a aula");
+        console.error('Erro detalhado ao excluir aula:', error);
+        toast.error(error.message || "Erro ao excluir a aula");
+      } finally {
+        setIsLoading(false);
       }
     }
   };
@@ -282,6 +286,18 @@ const AdminLessons = () => {
       toast.error("Selecione o módulo da aula");
       return;
     }
+    
+    // Verificar se já existe uma aula com a mesma ordem no módulo selecionado
+    const existingLessonWithSameOrder = lessons.find(
+      lesson => lesson.order === Number(formData.order) && 
+      (editingLessonId ? lesson.id !== editingLessonId : true)
+    );
+    
+    if (existingLessonWithSameOrder) {
+      toast.error(`Já existe uma aula com a ordem ${formData.order} neste módulo: ${existingLessonWithSameOrder.title}`);
+      return;
+    }
+    
     setIsLoading(true);
     try {
       if (editingLessonId) {
@@ -320,14 +336,31 @@ const AdminLessons = () => {
       setFormData({ ...defaultFormData });
       setEditingLessonId(null);
     } catch (error) {
-      toast.error(error.message || "Erro ao salvar a aula");
+      // Exibir mensagem de erro mais detalhada
+      const errorMessage = error.message || "Erro ao salvar a aula";
+      console.error('Erro detalhado:', error);
+      toast.error(errorMessage);
+      
+      // Se o erro for relacionado a ordem duplicada, destacar o campo de ordem
+      if (errorMessage.includes('ordem') || errorMessage.includes('Já existe uma aula')) {
+        // O campo já está destacado visualmente pelo CSS que adicionamos
+        // Focar no campo de ordem para chamar a atenção do usuário
+        document.getElementById('order')?.focus();
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
   const resetForm = () => {
-    setFormData({ ...defaultFormData });
+    // Sugerir a pru00f3xima ordem disponiu00edvel para uma nova aula
+    let nextOrder = 1;
+    if (lessons.length > 0) {
+      // Encontrar a maior ordem atual e adicionar 1
+      nextOrder = Math.max(...lessons.map(lesson => lesson.order || 0)) + 1;
+    }
+    
+    setFormData({ ...defaultFormData, order: nextOrder });
     setEditingLessonId(null);
   };
 
@@ -411,11 +444,20 @@ const AdminLessons = () => {
                   <SelectContent>
                     {allModules.map((mod) => (
                       <SelectItem key={mod.id} value={mod.id}>
-                        {mod.title}
+                        {mod.title} {mod.courseId && 
+                          <span className="text-gray-500 text-xs ml-1">
+                            (Ordem: {mod.order})
+                          </span>
+                        }
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {module && (
+                  <p className="text-xs text-blue-500 mt-1">
+                    Módulo atual: <strong>{module.title}</strong> (Ordem: {module.order})
+                  </p>
+                )}
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="title">Título</Label>
@@ -443,15 +485,30 @@ const AdminLessons = () => {
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="order">Ordem</Label>
-                <Input
-                  id="order"
-                  name="order"
-                  type="number"
-                  value={formData.order}
-                  onChange={handleInputChange}
-                  className="w-full min-w-0"
-                  min={1}
-                />
+                <div className="flex flex-col space-y-1">
+                  <Input
+                    id="order"
+                    name="order"
+                    type="number"
+                    value={formData.order}
+                    onChange={handleInputChange}
+                    className={`w-full min-w-0 ${
+                      lessons.some(lesson => lesson.order === Number(formData.order) && 
+                      (editingLessonId ? lesson.id !== editingLessonId : true)) 
+                        ? 'border-red-500 focus:ring-red-500' 
+                        : ''
+                    }`}
+                    min={1}
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {lessons.some(lesson => lesson.order === Number(formData.order) && 
+                      (editingLessonId ? lesson.id !== editingLessonId : true)) ? (
+                      <span className="text-red-500">Já existe uma aula com esta ordem</span>
+                    ) : (
+                      "A ordem determina a sequência de exibição das aulas"
+                    )}
+                  </p>
+                </div>
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="videoUrl">URL do Vídeo</Label>

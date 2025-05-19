@@ -15,7 +15,7 @@ export const createCourse = async (courseData: Omit<Course, 'id' | 'createdAt' |
         title: courseData.title,
         description: courseData.description,
         thumbnail: courseData.thumbnail || '/placeholder.svg',
-        duration: courseData.duration || '',
+        duration: courseData.duration ? `${courseData.duration} horas` : '',
         instructor: courseData.instructor,
         enrolledcount: courseData.enrolledCount || 0,
         rating: courseData.rating || 0
@@ -67,7 +67,7 @@ export const updateCourse = async (courseId: string, course: Partial<Course>): P
     if (course.title !== undefined) updateData.title = course.title;
     if (course.description !== undefined) updateData.description = course.description;
     if (course.thumbnail !== undefined) updateData.thumbnail = course.thumbnail;
-    if (course.duration !== undefined) updateData.duration = course.duration;
+    if (course.duration !== undefined) updateData.duration = course.duration ? `${course.duration} horas` : '';
     if (course.instructor !== undefined) updateData.instructor = course.instructor;
     if (course.rating !== undefined) updateData.rating = course.rating;
     if (course.enrolledCount !== undefined) updateData.enrolledcount = course.enrolledCount;

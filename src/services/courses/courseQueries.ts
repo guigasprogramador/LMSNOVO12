@@ -80,6 +80,26 @@ export const getCourses = async (): Promise<Course[]> => {
       });
     }
     
+    // Buscar contagem de alunos matriculados por curso
+    const { data: enrollmentData, error: enrollmentError } = await supabase
+      .from('enrollments')
+      .select('course_id');
+      
+    if (enrollmentError) {
+      console.warn('Erro ao buscar matrículas para contagem:', enrollmentError);
+    }
+    
+    // Contar alunos matriculados por curso
+    const enrollmentCountMap = {};
+    if (enrollmentData && enrollmentData.length > 0) {
+      enrollmentData.forEach(enrollment => {
+        if (!enrollmentCountMap[enrollment.course_id]) {
+          enrollmentCountMap[enrollment.course_id] = 0;
+        }
+        enrollmentCountMap[enrollment.course_id]++;
+      });
+    }
+    
     // Mapear os cursos para o formato desejado (sem carregar todos os módulos e aulas)
     const courses = coursesData.map(course => ({
       id: course.id,
@@ -88,7 +108,7 @@ export const getCourses = async (): Promise<Course[]> => {
       thumbnail: course.thumbnail || '/placeholder.svg',
       duration: course.duration || '',
       instructor: course.instructor,
-      enrolledCount: 0, // Valor padrão já que removemos o campo enrolledcount da consulta
+      enrolledCount: enrollmentCountMap[course.id] || 0, // Usar contagem real de alunos matriculados
       rating: 0, // Valor padrão já que removemos o campo rating da consulta
       moduleCount: moduleCountMap[course.id] || 0, // Adicionar contagem de módulos
       modules: [], // Array vazio - módulos serão carregados sob demanda

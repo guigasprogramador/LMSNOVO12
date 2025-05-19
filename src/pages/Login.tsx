@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
+import { supabase, clearAuthCacheManually } from "@/integrations/supabase/client";
 
 const loginSchema = z.object({
   email: z.string().email({ message: "Email inválido" }),
@@ -19,9 +20,35 @@ const loginSchema = z.object({
 type LoginFormValues = z.infer<typeof loginSchema>;
 
 const Login = () => {
-  const { login } = useAuth();
+  const { login, user, session } = useAuth();
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
+  const [loginAttempts, setLoginAttempts] = useState(0);
+  const [lastAttemptTime, setLastAttemptTime] = useState(0);
+  
+  // Verificar se o usuário já está logado e redirecionar para o dashboard
+  useEffect(() => {
+    if (user && session) {
+      navigate('/dashboard');
+    }
+  }, [user, session, navigate]);
+  
+  // Verificar se há uma sessão ativa ao carregar a página
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (!error && data.session) {
+          // Se houver uma sessão válida, redirecionar para o dashboard
+          navigate('/dashboard');
+        }
+      } catch (err) {
+        console.error('Erro ao verificar sessão:', err);
+      }
+    };
+    
+    checkSession();
+  }, [navigate]);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -33,13 +60,51 @@ const Login = () => {
 
   const onSubmit = async (data: LoginFormValues) => {
     setIsLoading(true);
+    
+    // Incrementar contador de tentativas
+    const newAttempts = loginAttempts + 1;
+    setLoginAttempts(newAttempts);
+    setLastAttemptTime(Date.now());
+    
     try {
+      // Se houver muitas tentativas em pouco tempo, podemos tentar uma abordagem diferente
+      // mas não vamos limpar o cache automaticamente para evitar problemas de logout
+      if (newAttempts > 1 && Date.now() - lastAttemptTime < 10000) {
+        console.log('Múltiplas tentativas de login em um curto período de tempo');
+      }
+      
+      // Tentar fazer login
       await login(data.email, data.password);
-      toast.success("Login realizado com sucesso!");
-      navigate("/dashboard");
-    } catch (error) {
-      toast.error("Falha ao fazer login. Verifique suas credenciais.");
-      console.error(error);
+      
+      // Verificar se o login foi bem-sucedido
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session) {
+        // Login bem-sucedido
+        toast.success("Login realizado com sucesso!");
+        navigate("/dashboard");
+      } else {
+        // Se não houver sessão após o login, algo deu errado
+        throw new Error("Falha ao estabelecer sessão");
+      }
+    } catch (error: any) {
+      console.error("Erro de login:", error);
+      
+      // Mensagem de erro mais específica
+      if (error.message?.includes('Invalid login credentials')) {
+        toast.error("Credenciais inválidas. Verifique seu email e senha.");
+      } else if (error.message?.includes('Email not confirmed')) {
+        toast.error("Email não confirmado. Verifique sua caixa de entrada.");
+      } else {
+        toast.error("Falha ao fazer login. Tente novamente.");
+      }
+      
+      // Se for a terceira tentativa, sugerir ao usuário limpar o cache
+      if (newAttempts >= 3) {
+        toast.error(
+          "Múltiplas tentativas de login falharam. Tente limpar o cache do navegador ou usar uma janela anônima.", 
+          { duration: 6000 }
+        );
+      }
     } finally {
       setIsLoading(false);
     }
@@ -86,9 +151,32 @@ const Login = () => {
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full bg-blue-600 text-white dark:bg-blue-700 dark:text-gray-100 hover:bg-blue-700 dark:hover:bg-blue-800" disabled={isLoading}>
+              <Button 
+                type="submit" 
+                className="w-full bg-blue-600 text-white dark:bg-blue-700 dark:text-gray-100 hover:bg-blue-700 dark:hover:bg-blue-800" 
+                disabled={isLoading}
+              >
                 {isLoading ? "Entrando..." : "Entrar"}
               </Button>
+              
+              {/* Botão alternativo para limpar cache e tentar novamente */}
+              {loginAttempts > 1 && (
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  className="w-full mt-2" 
+                  onClick={() => {
+                    // Usar a função exportada para limpar o cache de autenticação
+                    clearAuthCacheManually();
+                    toast.info("Cache de autenticação limpo. Tente fazer login novamente.");
+                    // Resetar formulário
+                    form.reset();
+                    setLoginAttempts(0);
+                  }}
+                >
+                  Limpar cache e tentar novamente
+                </Button>
+              )}
             </form>
           </Form>
         </CardContent>
